@@ -157,7 +157,7 @@
 		simple-audio-card,name = "rockchip,firefly-codec";
 		simple-audio-card,mclk-fs = <512>;
 
-/*		simple-audio-card,dai-link@0 {
+		simple-audio-card,dai-link@0 {
 			format = "i2s";
 			cpu {
 				sound-dai = <&i2s>;
@@ -166,9 +166,9 @@
 				sound-dai = <&hdmi>;
 			};
 		};
-*/
-//		simple-audio-card,dai-link@1 {
-		simple-audio-card,dai-link@0 {
+
+//		simple-audio-card,dai-link@0 {
+		simple-audio-card,dai-link@1 {
 			format = "i2s";
 			cpu {
 				sound-dai = <&i2s>;
