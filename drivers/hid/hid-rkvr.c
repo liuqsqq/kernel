@@ -142,6 +142,7 @@ static int inv_hid_register_devcie(struct rkvr_iio_hw_device *hw_device)
 		list_for_each_entry(p, &rkvr_hid_hw_device_list, l) {
 			if (!strcmp(hw_device->name, p->name)) {
 				pr_err("%s already exist ,abort\n", hw_device->name);
+				mutex_unlock(&device_list_lock);
 				return -1;
 			}
 		}
@@ -1263,10 +1264,12 @@ static int rkvr_fb_event_notify(struct notifier_block *self,
 	unsigned char buf[3] = {HID_REPORT_ID_RKVR, RKVR_ID_IDLE, 0};
 	struct hid_device *hid;
 	struct fb_event *event = data;
-	int blank_mode = *((int *)event->data);
+	int blank_mode;
 
 	if (action != FB_EARLY_EVENT_BLANK && action != FB_EVENT_BLANK)
 		return NOTIFY_OK;
+
+	blank_mode = *((int *)event->data);
 
 	mutex_lock(&minors_lock);
 	for (i = 0; i < RKVR_HIDRAW_MAX_DEVICES; i++) {

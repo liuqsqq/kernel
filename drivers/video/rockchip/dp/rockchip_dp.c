@@ -172,11 +172,10 @@ static int rockchip_dp_fb_event_notify(struct notifier_block *self,
 					   void *data)
 {
 	struct fb_event *event = data;
-	int blank_mode = *((int *)event->data);
 	struct dp_dev *dp_dev = container_of(self, struct dp_dev, fb_notif);
 
 	if (action == FB_EARLY_EVENT_BLANK) {
-		switch (blank_mode) {
+		switch (*((int *)event->data)) {
 		case FB_BLANK_UNBLANK:
 			break;
 		default:
@@ -187,7 +186,7 @@ static int rockchip_dp_fb_event_notify(struct notifier_block *self,
 			break;
 		}
 	} else if (action == FB_EVENT_BLANK) {
-		switch (blank_mode) {
+		switch (*((int *)event->data)) {
 		case FB_BLANK_UNBLANK:
 			if (dp_dev->hdmi->sleep) {
 				dp_dev->early_suspended = false;
@@ -230,7 +229,10 @@ int cdn_dp_fb_register(struct platform_device *pdev, void *dp)
 	rockchip_dp_dev_init_ops(rk_dp_ops);
 	rk_cdn_dp_prop->videosrc = dp_dev->disp_info.vop_sel;
 	rk_cdn_dp_prop->display = DISPLAY_MAIN;
-	rk_cdn_dp_prop->defaultmode = HDMI_VIDEO_DEFAULT_MODE;
+	if (!of_property_read_u32(np, "dp_defaultmode", &val))
+		rk_cdn_dp_prop->defaultmode = val;
+	else
+		rk_cdn_dp_prop->defaultmode = HDMI_VIDEO_DEFAULT_MODE;
 	rk_cdn_dp_prop->name = (char *)pdev->name;
 	rk_cdn_dp_prop->priv = dp_dev;
 	rk_cdn_dp_prop->feature |=

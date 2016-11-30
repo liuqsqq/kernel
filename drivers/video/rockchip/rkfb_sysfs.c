@@ -110,6 +110,32 @@ static ssize_t show_screen_info(struct device *dev,
 			fps, screen->type, screen->mode.vmode);
 }
 
+static ssize_t set_screen_info(struct device *dev,
+			       struct device_attribute *attr,
+			       const char *buf, size_t count)
+{
+	struct fb_info *fbi = dev_get_drvdata(dev);
+	struct rk_fb_par *fb_par = (struct rk_fb_par *)fbi->par;
+	struct rk_lcdc_driver *dev_drv = fb_par->lcdc_drv;
+	int xmirror = 0, ymirror = 0, ret = 0, rotate = 0;
+
+	ret = kstrtoint(buf, 0, &rotate);
+	if (ret)
+		return ret;
+	xmirror = !!(rotate & X_MIRROR);
+	ymirror = !!(rotate & Y_MIRROR);
+	dev_drv->cur_screen->x_mirror = xmirror;
+	dev_drv->cur_screen->y_mirror = ymirror;
+	mutex_lock(&dev_drv->output_lock);
+	mutex_lock(&dev_drv->win_config);
+	if (dev_drv->ops->extern_func)
+		dev_drv->ops->extern_func(dev_drv, SET_DSP_MIRROR);
+	mutex_unlock(&dev_drv->win_config);
+	mutex_unlock(&dev_drv->output_lock);
+
+	return count;
+}
+
 static ssize_t show_disp_info(struct device *dev,
 			      struct device_attribute *attr, char *buf)
 {
@@ -254,8 +280,10 @@ static ssize_t show_dump_buffer(struct device *dev,
 
 	size = snprintf(buf, PAGE_SIZE,
 			"bmp       -- dump buffer to bmp image\n"
+			"             can't support dump to single file\n"
 			"bin       -- dump buffer to bin image\n"
-			"multi    --  each dump will create new file\n"
+			"multi     -- each dump will create new file\n"
+			"             only works on trace context\n"
 			"win=num   -- mask win to dump, default mask all\n"
 			"             win=1, will dump win1 buffer\n"
 			"             win=23, will dump win2 area3 buffer\n"
@@ -382,8 +410,7 @@ static ssize_t set_dump_buffer(struct device *dev,
 			continue;
 		}
 		if (!strncmp(p, "multi", 5)) {
-			is_append = true;
-			is_bmp = false;
+			is_append = false;
 			continue;
 		}
 
@@ -404,16 +431,13 @@ static ssize_t set_dump_buffer(struct device *dev,
 		return PTR_ERR(dentry);
 	}
 
+	mutex_lock(&dev_drv->front_lock);
 	if (!num_frames) {
-		mutex_lock(&dev_drv->front_lock);
-
 		if (!dev_drv->front_regs) {
 			u16 xact, yact;
 			int data_format;
 			u32 dsp_addr;
 			int ymirror;
-
-			mutex_unlock(&dev_drv->front_lock);
 
 			if (dev_drv->ops->get_dspbuf_info)
 				dev_drv->ops->get_dspbuf_info(dev_drv, &xact,
@@ -425,8 +449,10 @@ static ssize_t set_dump_buffer(struct device *dev,
 			goto out;
 		}
 		front_regs = kmalloc(sizeof(*front_regs), GFP_KERNEL);
-		if (!front_regs)
+		if (!front_regs) {
+			mutex_unlock(&dev_drv->front_lock);
 			return -ENOMEM;
+		}
 		memcpy(front_regs, dev_drv->front_regs, sizeof(*front_regs));
 
 		for (i = 0; i < front_regs->win_num; i++) {
@@ -457,16 +483,13 @@ static ssize_t set_dump_buffer(struct device *dev,
 					 area_data->smem_start,
 					 area_data->xvir, area_data->yvir,
 					 area_data->data_format,
-					 trace->count_frame,
-					 i, j, trace->is_bmp, trace->is_append);
+					 0, i, j, is_bmp, false);
 				if (area_data->ion_handle)
 					ion_handle_put(area_data->ion_handle);
 			}
 		}
 
 		kfree(front_regs);
-
-		mutex_unlock(&dev_drv->front_lock);
 	} else {
 		trace->num_frames = num_frames;
 		trace->count_frame = 0;
@@ -476,7 +499,7 @@ static ssize_t set_dump_buffer(struct device *dev,
 		trace->mask_area = mask_area;
 	}
 out:
-
+	mutex_unlock(&dev_drv->front_lock);
 	return count;
 }
 
@@ -743,17 +766,22 @@ static ssize_t set_fps(struct device *dev, struct device_attribute *attr,
 	struct fb_info *fbi = dev_get_drvdata(dev);
 	struct rk_fb_par *fb_par = (struct rk_fb_par *)fbi->par;
 	struct rk_lcdc_driver *dev_drv = fb_par->lcdc_drv;
-	u32 fps;
+	struct rk_screen *screen = dev_drv->cur_screen;
+	u32 fps, origin_fps;
 	int ret;
 
 	ret = kstrtou32(buf, 0, &fps);
 	if (ret)
 		return ret;
 
-	if (fps == 0 || fps > 60) {
-		dev_info(dev, "unsupport fps value,pelase set 1~60\n");
-		return count;
-	}
+	origin_fps = rk_fb_calc_fps(screen, dev_drv->pixclock);
+
+	/*
+	 * use too low or too high fps would make screen abnormal,
+	 * and maybe can't recovery, so limit the fps.
+	 */
+	if (fps <= 40 || fps > origin_fps)
+		fps = origin_fps;
 
 	if (dev_drv->ops->fps_mgr)
 		ret = dev_drv->ops->fps_mgr(dev_drv, fps, 1);
@@ -1257,7 +1285,8 @@ static struct device_attribute rkfb_attrs[] = {
 	__ATTR(disp_info, S_IRUGO, show_disp_info, NULL),
 	__ATTR(dump_buf, S_IRUGO | S_IWUSR, show_dump_buffer, set_dump_buffer),
 	__ATTR(dsp_buf, S_IRUGO | S_IWUSR, show_dsp_buffer, set_dsp_buffer),
-	__ATTR(screen_info, S_IRUGO, show_screen_info, NULL),
+	__ATTR(screen_info, S_IRUGO | S_IWUSR,
+	       show_screen_info, set_screen_info),
 	__ATTR(dual_mode, S_IRUGO, show_dual_mode, NULL),
 	__ATTR(enable, S_IRUGO | S_IWUSR, show_fb_state, set_fb_state),
 	__ATTR(overlay, S_IRUGO | S_IWUSR, show_overlay, set_overlay),

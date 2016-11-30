@@ -53,8 +53,9 @@ kbase_devfreq_target(struct device *dev, unsigned long *target_freq, u32 flags)
 	struct kbase_device *kbdev = dev_get_drvdata(dev);
 	struct dev_pm_opp *opp;
 	unsigned long freq = 0;
+	unsigned long old_freq = kbdev->current_freq;
 	unsigned long voltage;
-	int err;
+	int err = 0;
 
 	freq = *target_freq;
 
@@ -70,15 +71,25 @@ kbase_devfreq_target(struct device *dev, unsigned long *target_freq, u32 flags)
 	/*
 	 * Only update if there is a change of frequency
 	 */
-	if (kbdev->current_freq == freq) {
+	if (old_freq == freq) {
 		*target_freq = freq;
+#ifdef CONFIG_REGULATOR
+		if (kbdev->current_voltage == voltage)
+			return 0;
+		err = regulator_set_voltage(kbdev->regulator, voltage, INT_MAX);
+		if (err) {
+			dev_err(dev, "Failed to set voltage (%d)\n", err);
+			return err;
+		}
+#else
 		return 0;
+#endif
 	}
 
 #ifdef CONFIG_REGULATOR
-	if (kbdev->regulator && kbdev->current_voltage != voltage
-			&& kbdev->current_freq < freq) {
-		err = regulator_set_voltage(kbdev->regulator, voltage, voltage);
+	if (kbdev->regulator && kbdev->current_voltage != voltage &&
+	    old_freq < freq) {
+		err = regulator_set_voltage(kbdev->regulator, voltage, INT_MAX);
 		if (err) {
 			dev_err(dev, "Failed to increase voltage (%d)\n", err);
 			return err;
@@ -86,17 +97,23 @@ kbase_devfreq_target(struct device *dev, unsigned long *target_freq, u32 flags)
 	}
 #endif
 
-	err = clk_set_rate(kbdev->clock, freq);
+	mutex_lock(&kbdev->mutex_for_clk);
+	if (!kbdev->is_power_off)
+		err = clk_set_rate(kbdev->clock, freq);
+	kbdev->freq = freq;
+	mutex_unlock(&kbdev->mutex_for_clk);
 	if (err) {
 		dev_err(dev, "Failed to set clock %lu (target %lu)\n",
 				freq, *target_freq);
 		return err;
 	}
+	*target_freq = freq;
+	kbdev->current_freq = freq;
 
 #ifdef CONFIG_REGULATOR
-	if (kbdev->regulator && kbdev->current_voltage != voltage
-			&& kbdev->current_freq > freq) {
-		err = regulator_set_voltage(kbdev->regulator, voltage, voltage);
+	if (kbdev->regulator && kbdev->current_voltage != voltage &&
+	    old_freq > freq) {
+		err = regulator_set_voltage(kbdev->regulator, voltage, INT_MAX);
 		if (err) {
 			dev_err(dev, "Failed to decrease voltage (%d)\n", err);
 			return err;
@@ -104,9 +121,7 @@ kbase_devfreq_target(struct device *dev, unsigned long *target_freq, u32 flags)
 	}
 #endif
 
-	*target_freq = freq;
 	kbdev->current_voltage = voltage;
-	kbdev->current_freq = freq;
 
 	kbase_pm_reset_dvfs_utilisation(kbdev);
 
@@ -209,6 +224,11 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 		return -ENODEV;
 
 	kbdev->current_freq = clk_get_rate(kbdev->clock);
+#ifdef CONFIG_REGULATOR
+	if (kbdev->regulator)
+		kbdev->current_voltage =
+			regulator_get_voltage(kbdev->regulator);
+#endif
 
 	dp = &kbdev->devfreq_profile;
 

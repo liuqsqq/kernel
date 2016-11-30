@@ -3561,7 +3561,6 @@ static int vop_early_resume(struct rk_lcdc_driver *dev_drv)
 	spin_lock(&vop_dev->reg_lock);
 
 	vop_msk_reg(vop_dev, DSP_CTRL0, V_DSP_OUT_ZERO(0));
-	vop_msk_reg(vop_dev, SYS_CTRL, V_VOP_STANDBY_EN(0));
 	vop_msk_reg(vop_dev, DSP_CTRL0, V_DSP_BLANK_EN(0));
 	vop_cfg_done(vop_dev);
 	spin_unlock(&vop_dev->reg_lock);
@@ -3573,6 +3572,11 @@ static int vop_early_resume(struct rk_lcdc_driver *dev_drv)
 		mdelay(50);
 		rockchip_iovmm_activate(dev_drv->dev);
 	}
+
+	spin_lock(&vop_dev->reg_lock);
+	vop_msk_reg(vop_dev, SYS_CTRL, V_VOP_STANDBY_EN(0));
+	vop_cfg_done(vop_dev);
+	spin_unlock(&vop_dev->reg_lock);
 
 	dev_drv->suspend_flag = 0;
 
@@ -4203,40 +4207,68 @@ static ssize_t vop_get_disp_info(struct rk_lcdc_driver *dev_drv,
 static int vop_fps_mgr(struct rk_lcdc_driver *dev_drv, int fps, bool set)
 {
 	struct vop_device *vop_dev =
-	    container_of(dev_drv, struct vop_device, driver);
-	struct rk_screen *screen = dev_drv->cur_screen;
-	u64 ft = 0;
-	u32 dotclk;
+		container_of(dev_drv, struct vop_device, driver);
+	struct rk_fb_vsync *vsync = &dev_drv->vsync_info;
+	int step_fps, old_fps;
+	u32 h_total, v_total;
+	unsigned long dclk;
+	u64 val;
 	int ret;
-	u32 pixclock;
-	u32 x_total, y_total;
 
-	if (set) {
-		if (fps == 0) {
-			dev_info(dev_drv->dev, "unsupport set fps=0\n");
-			return 0;
-		}
-		ft = div_u64(1000000000000llu, fps);
-		x_total =
-		    screen->mode.upper_margin + screen->mode.lower_margin +
-		    screen->mode.yres + screen->mode.vsync_len;
-		y_total =
-		    screen->mode.left_margin + screen->mode.right_margin +
-		    screen->mode.xres + screen->mode.hsync_len;
-		dev_drv->pixclock = div_u64(ft, x_total * y_total);
-		dotclk = div_u64(1000000000000llu, dev_drv->pixclock);
-		ret = clk_set_rate(vop_dev->dclk, dotclk);
+	dclk = clk_get_rate(vop_dev->dclk);
+
+	spin_lock(&vop_dev->reg_lock);
+
+	if (!vop_dev->clk_on) {
+		spin_unlock(&vop_dev->reg_lock);
+		return 0;
 	}
 
-	pixclock = div_u64(1000000000000llu, clk_get_rate(vop_dev->dclk));
-	vop_dev->pixclock = pixclock;
-	dev_drv->pixclock = vop_dev->pixclock;
-	fps = rk_fb_calc_fps(screen, pixclock);
-	screen->ft = 1000 / fps;	/*one frame time in ms */
+	val = vop_readl(vop_dev, DSP_HTOTAL_HS_END);
+	h_total = (val & MASK(DSP_HTOTAL)) >> 16;
 
-	if (set)
-		dev_info(dev_drv->dev, "%s:dclk:%lu,fps:%d\n", __func__,
-			 clk_get_rate(vop_dev->dclk), fps);
+	val = vop_readl(vop_dev, DSP_VTOTAL_VS_END);
+	v_total = (val & MASK(DSP_VTOTAL)) >> 16;
+
+	spin_unlock(&vop_dev->reg_lock);
+
+	old_fps = div_u64(dclk, v_total * h_total);
+
+	if (!set)
+		return old_fps;
+
+	/*
+	 * Direct change fps to dest fps would may screen flash,
+	 * Every frame change one step fps is safe, screen flash
+	 * disappear.
+	 */
+	step_fps = old_fps;
+	while (step_fps != fps) {
+		ktime_t timestamp = vsync->timestamp;
+
+		if (step_fps > fps)
+			step_fps--;
+		else
+			step_fps++;
+		spin_lock(&vop_dev->reg_lock);
+		if (!vop_dev->clk_on) {
+			spin_unlock(&vop_dev->reg_lock);
+			break;
+		}
+		h_total = div_u64(dclk, step_fps * v_total);
+		val = V_DSP_HTOTAL(h_total);
+		vop_msk_reg(vop_dev, DSP_HTOTAL_HS_END, val);
+		vop_cfg_done(vop_dev);
+		spin_unlock(&vop_dev->reg_lock);
+
+		ret = wait_event_interruptible_timeout(vsync->wait,
+			!ktime_equal(timestamp, vsync->timestamp) &&
+			(vsync->active > 0 || vsync->irq_stop),
+			msecs_to_jiffies(50));
+	}
+
+	dev_info(dev_drv->dev, "%s:dclk:%lu, htotal=%d, vtatol=%d, fps:%d\n",
+		 __func__, dclk, h_total, v_total, fps);
 
 	return fps;
 }
@@ -4788,6 +4820,7 @@ static int vop_extern_func(struct rk_lcdc_driver *dev_drv, int cmd)
 {
 	struct vop_device *vop_dev =
 	    container_of(dev_drv, struct vop_device, driver);
+	u64 val;
 
 	if (unlikely(!vop_dev->clk_on)) {
 		pr_info("%s,clk_on = %d\n", __func__, vop_dev->clk_on);
@@ -4797,6 +4830,14 @@ static int vop_extern_func(struct rk_lcdc_driver *dev_drv, int cmd)
 	switch (cmd) {
 	case UPDATE_CABC_PWM:
 		vop_cfg_done(vop_dev);
+		break;
+	case SET_DSP_MIRROR:
+		val = V_DSP_X_MIR_EN(dev_drv->cur_screen->x_mirror) |
+			V_DSP_Y_MIR_EN(dev_drv->cur_screen->y_mirror);
+		vop_msk_reg(vop_dev, DSP_CTRL0, val);
+		pr_info("%s: xmirror: %d, ymirror: %d\n",
+			__func__, dev_drv->cur_screen->x_mirror,
+			dev_drv->cur_screen->y_mirror);
 		break;
 	default:
 		break;

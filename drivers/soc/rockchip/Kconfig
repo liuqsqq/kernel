@@ -3,6 +3,13 @@ if ARCH_ROCKCHIP || COMPILE_TEST
 #
 # Rockchip Soc drivers
 #
+config ROCKCHIP_PM_TEST
+	bool "Rockchip pm_test support"
+	default n
+	help
+	  Say y here to enable pm_test support.
+	  Add /sys/pm_tests/ node, only for internal testing.
+
 config ROCKCHIP_PM_DOMAINS
         bool "Rockchip generic power domain"
         depends on PM
@@ -14,5 +21,13 @@ config ROCKCHIP_PM_DOMAINS
           mode. The RK3288 PMU is dedicated for managing the power of the whole chip.
 
           If unsure, say N.
+
+config ROCKCHIP_PVTM
+	bool "Rockchip PVTM support"
+	help
+	  Say y here to enable pvtm support.
+	  The Process-Voltage-Temperature Monitor (PVTM) is used to monitor
+	  the chip performance variance caused by chip process, voltage and
+	  temperature.
 
 endif

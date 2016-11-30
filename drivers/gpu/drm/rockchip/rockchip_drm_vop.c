@@ -328,10 +328,13 @@ static enum vop_data_format vop_convert_format(uint32_t format)
 	case DRM_FORMAT_BGR565:
 		return VOP_FMT_RGB565;
 	case DRM_FORMAT_NV12:
+	case DRM_FORMAT_NV12_10:
 		return VOP_FMT_YUV420SP;
 	case DRM_FORMAT_NV16:
+	case DRM_FORMAT_NV16_10:
 		return VOP_FMT_YUV422SP;
 	case DRM_FORMAT_NV24:
+	case DRM_FORMAT_NV24_10:
 		return VOP_FMT_YUV444SP;
 	default:
 		DRM_ERROR("unsupport format[%08x]\n", format);
@@ -343,8 +346,23 @@ static bool is_yuv_support(uint32_t format)
 {
 	switch (format) {
 	case DRM_FORMAT_NV12:
+	case DRM_FORMAT_NV12_10:
 	case DRM_FORMAT_NV16:
+	case DRM_FORMAT_NV16_10:
 	case DRM_FORMAT_NV24:
+	case DRM_FORMAT_NV24_10:
+		return true;
+	default:
+		return false;
+	}
+}
+
+static bool is_yuv_10bit(uint32_t format)
+{
+	switch (format) {
+	case DRM_FORMAT_NV12_10:
+	case DRM_FORMAT_NV16_10:
+	case DRM_FORMAT_NV24_10:
 		return true;
 	default:
 		return false;
@@ -730,6 +748,12 @@ static void vop_crtc_disable(struct drm_crtc *crtc)
 		struct vop_win *win = &vop->win[i];
 
 		spin_lock(&vop->reg_lock);
+		if (win->phy->scl && win->phy->scl->ext) {
+			VOP_SCL_SET_EXT(vop, win, yrgb_hor_scl_mode, SCALE_NONE);
+			VOP_SCL_SET_EXT(vop, win, yrgb_ver_scl_mode, SCALE_NONE);
+			VOP_SCL_SET_EXT(vop, win, cbcr_hor_scl_mode, SCALE_NONE);
+			VOP_SCL_SET_EXT(vop, win, cbcr_ver_scl_mode, SCALE_NONE);
+		}
 		VOP_WIN_SET(vop, win, enable, 0);
 		spin_unlock(&vop->reg_lock);
 	}
@@ -863,7 +887,7 @@ static int vop_plane_atomic_check(struct drm_plane *plane,
 	if (is_yuv_support(fb->pixel_format) && ((src->x1 >> 16) % 2))
 		return -EINVAL;
 
-	offset = (src->x1 >> 16) * drm_format_plane_cpp(fb->pixel_format, 0);
+	offset = (src->x1 >> 16) * drm_format_plane_bpp(fb->pixel_format, 0) / 8;
 	if (state->rotation & BIT(DRM_REFLECT_Y))
 		offset += ((src->y2 >> 16) - 1) * fb->pitches[0];
 	else
@@ -874,9 +898,9 @@ static int vop_plane_atomic_check(struct drm_plane *plane,
 	if (is_yuv_support(fb->pixel_format)) {
 		int hsub = drm_format_horz_chroma_subsampling(fb->pixel_format);
 		int vsub = drm_format_vert_chroma_subsampling(fb->pixel_format);
-		int bpp = drm_format_plane_cpp(fb->pixel_format, 1);
+		int bpp = drm_format_plane_bpp(fb->pixel_format, 1);
 
-		offset = (src->x1 >> 16) * bpp / hsub;
+		offset = (src->x1 >> 16) * bpp / hsub / 8;
 		offset += (src->y1 >> 16) * fb->pitches[1] / vsub;
 
 		dma_addr = rockchip_fb_get_dma_addr(fb, 1);
@@ -905,6 +929,16 @@ static void vop_plane_atomic_disable(struct drm_plane *plane,
 
 	spin_lock(&vop->reg_lock);
 
+	/*
+	 * FIXUP: some of the vop scale would be abnormal after windows power
+	 * on/off so deinit scale to scale_none mode.
+	 */
+	if (win->phy->scl && win->phy->scl->ext) {
+		VOP_SCL_SET_EXT(vop, win, yrgb_hor_scl_mode, SCALE_NONE);
+		VOP_SCL_SET_EXT(vop, win, yrgb_ver_scl_mode, SCALE_NONE);
+		VOP_SCL_SET_EXT(vop, win, cbcr_hor_scl_mode, SCALE_NONE);
+		VOP_SCL_SET_EXT(vop, win, cbcr_ver_scl_mode, SCALE_NONE);
+	}
 	VOP_WIN_SET(vop, win, enable, 0);
 
 	spin_unlock(&vop->reg_lock);
@@ -970,6 +1004,7 @@ static void vop_plane_atomic_update(struct drm_plane *plane,
 		VOP_WIN_SET(vop, win, uv_vir, fb->pitches[1] >> 2);
 		VOP_WIN_SET(vop, win, uv_mst, vop_plane_state->uv_mst);
 	}
+	VOP_WIN_SET(vop, win, fmt_10, is_yuv_10bit(fb->pixel_format));
 
 	scl_vop_cal_scl_fac(vop, win, actual_w, actual_h,
 			    drm_rect_width(dest), drm_rect_height(dest),
@@ -1517,13 +1552,25 @@ static void vop_crtc_atomic_flush(struct drm_crtc *crtc,
 	if (!vop->is_iommu_enabled && vop->is_iommu_needed) {
 		int ret;
 		if (!vop_is_allwin_disabled(vop)) {
+			reinit_completion(&vop->dsp_hold_completion);
+			vop_dsp_hold_valid_irq_enable(vop);
+
 			vop_cfg_update(crtc, old_crtc_state);
-			while(!vop_is_cfg_done_complete(vop));
+			spin_lock(&vop->reg_lock);
+
+			VOP_CTRL_SET(vop, standby, 1);
+
+			spin_unlock(&vop->reg_lock);
+
+			wait_for_completion(&vop->dsp_hold_completion);
+
+			vop_dsp_hold_valid_irq_disable(vop);
 		}
 		ret = rockchip_drm_dma_attach_device(vop->drm_dev, vop->dev);
 		if (ret) {
 			dev_err(vop->dev, "failed to attach dma mapping, %d\n", ret);
 		}
+		VOP_CTRL_SET(vop, standby, 0);
 		vop->is_iommu_enabled = true;
 	}
 

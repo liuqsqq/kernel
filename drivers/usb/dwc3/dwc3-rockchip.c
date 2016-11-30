@@ -27,6 +27,7 @@
 #include <linux/of_platform.h>
 #include <linux/pm_runtime.h>
 #include <linux/extcon.h>
+#include <linux/freezer.h>
 #include <linux/reset.h>
 #include <linux/usb.h>
 #include <linux/usb/hcd.h>
@@ -86,7 +87,7 @@ static void dwc3_rockchip_otg_extcon_evt_work(struct work_struct *work)
 	struct xhci_hcd		*xhci;
 	unsigned long		flags;
 	int			ret;
-	u32			reg;
+	u32			reg, count;
 
 	mutex_lock(&rockchip->lock);
 
@@ -225,6 +226,41 @@ static void dwc3_rockchip_otg_extcon_evt_work(struct work_struct *work)
 
 			if (hcd->state != HC_STATE_HALT) {
 				xhci->xhc_state |= XHCI_STATE_REMOVING;
+				count = 0;
+
+				/*
+				 * Wait until XHCI controller resume from
+				 * PM suspend, them we can remove hcd safely.
+				 */
+				while (dwc->xhci->dev.power.is_suspended) {
+					if (++count > 100) {
+						dev_err(rockchip->dev,
+							"wait for XHCI resume 10s timeout!\n");
+						goto out;
+					}
+					msleep(100);
+				}
+
+#ifdef CONFIG_FREEZER
+				/*
+				 * usb_remove_hcd() may call usb_disconnect() to
+				 * remove a block device pluged in before.
+				 * Unfortunately, the block layer suspend/resume
+				 * path is fundamentally broken due to freezable
+				 * kthreads and workqueue and may deadlock if a
+				 * block device gets removed while resume is in
+				 * progress.
+				 *
+				 * We need to add a ugly hack to avoid removing
+				 * hcd and kicking off device removal while
+				 * freezer is active. This is a joke but does
+				 * avoid this particular deadlock when test with
+				 * USB-C HUB and USB2/3 flash drive.
+				 */
+				while (pm_freezing)
+					usleep_range(10000, 11000);
+#endif
+
 				usb_remove_hcd(hcd->shared_hcd);
 				usb_remove_hcd(hcd);
 			}
@@ -542,6 +578,9 @@ static int dwc3_rockchip_resume(struct device *dev)
 	struct dwc3_rockchip *rockchip = dev_get_drvdata(dev);
 
 	rockchip->suspended = false;
+
+	if (rockchip->edev)
+		schedule_work(&rockchip->otg_work);
 
 	return 0;
 }

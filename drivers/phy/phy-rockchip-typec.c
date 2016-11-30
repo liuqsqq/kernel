@@ -269,6 +269,7 @@ struct rockchip_usb3phy_port_cfg {
 	struct usb3phy_reg usb3host_port;
 	struct usb3phy_reg external_psm;
 	struct usb3phy_reg pipe_status;
+	struct usb3phy_reg uphy_dp_sel;
 };
 
 struct rockchip_typec_phy {
@@ -762,6 +763,7 @@ static const struct phy_ops rockchip_usb3_phy_ops = {
 static int rockchip_dp_phy_power_on(struct phy *phy)
 {
 	struct rockchip_typec_phy *tcphy = phy_get_drvdata(phy);
+	struct rockchip_usb3phy_port_cfg *cfg = &tcphy->port_cfgs;
 	int new_mode, ret = 0;
 	u32 val;
 
@@ -791,6 +793,8 @@ static int rockchip_dp_phy_power_on(struct phy *phy)
 	} else if (tcphy->mode == MODE_DISCONNECT) {
 		tcphy_phy_init(tcphy, new_mode);
 	}
+
+	property_enable(tcphy, &cfg->uphy_dp_sel, 1);
 
 	ret = readx_poll_timeout(readl, tcphy->base + DP_MODE_CTL,
 				 val, val & DP_MODE_A2, 1000,
@@ -905,6 +909,11 @@ static int tcphy_parse_dt(struct rockchip_typec_phy *tcphy,
 	if (ret)
 		return ret;
 
+	ret = tcphy_get_param(dev, &cfg->uphy_dp_sel,
+			      "rockchip,uphy-dp-sel");
+	if (ret)
+		return ret;
+
 	tcphy->grf_regs = syscon_regmap_lookup_by_phandle(dev->of_node,
 							  "rockchip,grf");
 	if (IS_ERR(tcphy->grf_regs)) {
@@ -998,6 +1007,8 @@ static int rockchip_typec_phy_probe(struct platform_device *pdev)
 		}
 	}
 
+	pm_runtime_enable(dev);
+
 	for_each_available_child_of_node(np, child_np) {
 		struct phy *phy;
 
@@ -1013,6 +1024,7 @@ static int rockchip_typec_phy_probe(struct platform_device *pdev)
 		if (IS_ERR(phy)) {
 			dev_err(dev, "failed to create phy: %s\n",
 				child_np->name);
+			pm_runtime_disable(dev);
 			return PTR_ERR(phy);
 		}
 
@@ -1022,8 +1034,16 @@ static int rockchip_typec_phy_probe(struct platform_device *pdev)
 	phy_provider = devm_of_phy_provider_register(dev, of_phy_simple_xlate);
 	if (IS_ERR(phy_provider)) {
 		dev_err(dev, "Failed to register phy provider\n");
+		pm_runtime_disable(dev);
 		return PTR_ERR(phy_provider);
 	}
+
+	return 0;
+}
+
+static int rockchip_typec_phy_remove(struct platform_device *pdev)
+{
+	pm_runtime_disable(&pdev->dev);
 
 	return 0;
 }
@@ -1037,6 +1057,7 @@ MODULE_DEVICE_TABLE(of, rockchip_typec_phy_dt_ids);
 
 static struct platform_driver rockchip_typec_phy_driver = {
 	.probe		= rockchip_typec_phy_probe,
+	.remove		= rockchip_typec_phy_remove,
 	.driver		= {
 		.name	= "rockchip-typec-phy",
 		.of_match_table = rockchip_typec_phy_dt_ids,
