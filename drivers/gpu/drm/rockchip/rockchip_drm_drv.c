@@ -221,6 +221,7 @@ of_parse_display_resource(struct drm_device *drm_dev, struct device_node *route)
 	struct drm_framebuffer *fb;
 	struct drm_connector *connector;
 	struct drm_crtc *crtc;
+	const char *string;
 	u32 val;
 
 	connect = of_parse_phandle(route, "connect", 0);
@@ -256,11 +257,14 @@ of_parse_display_resource(struct drm_device *drm_dev, struct device_node *route)
 	if (!of_property_read_u32(route, "logo,ymirror", &val))
 		set->ymirror = val;
 
+	set->ratio = 1;
+	if (!of_property_read_string(route, "logo,mode", &string) &&
+	    !strcmp(string, "fullscreen"))
+			set->ratio = 0;
+
 	set->fb = fb;
 	set->crtc = crtc;
 	set->connector = connector;
-	/* TODO: set display fullscreen or center */
-	set->ratio = 0;
 
 	return set;
 }
@@ -292,11 +296,14 @@ int setup_initial_state(struct drm_device *drm_dev,
 
 	funcs = connector->helper_private;
 	conn_state->best_encoder = funcs->best_encoder(connector);
+	if (funcs->loader_protect)
+		funcs->loader_protect(connector, true);
 	num_modes = connector->funcs->fill_modes(connector, 4096, 4096);
 	if (!num_modes) {
 		dev_err(drm_dev->dev, "connector[%s] can't found any modes\n",
 			connector->name);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto error;
 	}
 
 	list_for_each_entry(mode, &connector->modes, head) {
@@ -323,15 +330,18 @@ int setup_initial_state(struct drm_device *drm_dev,
 							head);
 			if (!mode) {
 				pr_err("failed to find available modes\n");
-				return -EINVAL;
+				ret = -EINVAL;
+				goto error;
 			}
 		}
 	}
 
 	set->mode = mode;
 	crtc_state = drm_atomic_get_crtc_state(state, crtc);
-	if (IS_ERR(crtc_state))
-		return PTR_ERR(crtc_state);
+	if (IS_ERR(crtc_state)) {
+		ret = PTR_ERR(crtc_state);
+		goto error;
+	}
 
 	drm_mode_copy(&crtc_state->adjusted_mode, mode);
 	if (!match || !is_crtc_enabled) {
@@ -339,20 +349,24 @@ int setup_initial_state(struct drm_device *drm_dev,
 	} else {
 		ret = drm_atomic_set_crtc_for_connector(conn_state, crtc);
 		if (ret)
-			return ret;
+			goto error;
 
 		ret = drm_atomic_set_mode_for_crtc(crtc_state, mode);
 		if (ret)
-			return ret;
+			goto error;
 
 		crtc_state->active = true;
 	}
 
-	if (!set->fb)
-		return 0;
+	if (!set->fb) {
+		ret = 0;
+		goto error;
+	}
 	primary_state = drm_atomic_get_plane_state(state, crtc->primary);
-	if (IS_ERR(primary_state))
-		return PTR_ERR(primary_state);
+	if (IS_ERR(primary_state)) {
+		ret = PTR_ERR(primary_state);
+		goto error;
+	}
 
 	hdisplay = mode->hdisplay;
 	vdisplay = mode->vdisplay;
@@ -388,6 +402,11 @@ int setup_initial_state(struct drm_device *drm_dev,
 	}
 
 	return 0;
+
+error:
+	if (funcs->loader_protect)
+		funcs->loader_protect(connector, false);
+	return ret;
 }
 
 static int update_state(struct drm_device *drm_dev,
@@ -423,10 +442,24 @@ static int update_state(struct drm_device *drm_dev,
 		crtc_state->active = true;
 	} else {
 		const struct drm_crtc_helper_funcs *funcs;
+		const struct drm_encoder_helper_funcs *encoder_helper_funcs;
+		const struct drm_connector_helper_funcs *connector_helper_funcs;
+		struct drm_encoder *encoder;
 
 		funcs = crtc->helper_private;
-		if (!funcs || !funcs->enable)
+		connector_helper_funcs = connector->helper_private;
+		if (!funcs || !funcs->enable ||
+		    !connector_helper_funcs ||
+		    !connector_helper_funcs->best_encoder)
 			return -ENXIO;
+		encoder = connector_helper_funcs->best_encoder(connector);
+		encoder_helper_funcs = encoder->helper_private;
+		if (!encoder || !encoder_helper_funcs->atomic_check)
+			return -ENXIO;
+		ret = encoder_helper_funcs->atomic_check(encoder, crtc->state,
+							 conn_state);
+		if (ret)
+			return ret;
 		funcs->enable(crtc);
 	}
 
@@ -487,6 +520,9 @@ static void show_loader_logo(struct drm_device *drm_dev)
 	state->acquire_ctx = mode_config->acquire_ctx;
 
 	for_each_child_of_node(root, route) {
+		if (!of_device_is_available(route))
+			continue;
+
 		set = of_parse_display_resource(drm_dev, route);
 		if (!set)
 			continue;

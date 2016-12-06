@@ -39,7 +39,6 @@
 #include <linux/debugfs.h>
 #include <linux/pm_runtime.h>
 
-#include <linux/rockchip/cpu.h>
 #include <linux/rockchip/cru.h>
 #include <linux/rockchip/pmu.h>
 #include <linux/rockchip/grf.h>
@@ -569,6 +568,7 @@ static int vpu_get_clk(struct vpu_service_info *pservice)
 		pservice->pd_video = devm_clk_get(dev, "pd_hevc");
 		if (IS_ERR(pservice->pd_video)) {
 			dev_err(dev, "failed on clk_get pd_hevc\n");
+			pservice->pd_video = NULL;
 			return -1;
 		}
 	case VCODEC_DEVICE_ID_COMBO:
@@ -581,18 +581,21 @@ static int vpu_get_clk(struct vpu_service_info *pservice)
 		pservice->clk_core = devm_clk_get(dev, "clk_core");
 		if (IS_ERR(pservice->clk_core)) {
 			dev_err(dev, "failed on clk_get clk_core\n");
+			pservice->clk_core = NULL;
 			return -1;
 		}
 	case VCODEC_DEVICE_ID_VPU:
 		pservice->aclk_vcodec = devm_clk_get(dev, "aclk_vcodec");
 		if (IS_ERR(pservice->aclk_vcodec)) {
 			dev_err(dev, "failed on clk_get aclk_vcodec\n");
+			pservice->aclk_vcodec = NULL;
 			return -1;
 		}
 
 		pservice->hclk_vcodec = devm_clk_get(dev, "hclk_vcodec");
 		if (IS_ERR(pservice->hclk_vcodec)) {
 			dev_err(dev, "failed on clk_get hclk_vcodec\n");
+			pservice->hclk_vcodec = NULL;
 			return -1;
 		}
 		if (pservice->pd_video == NULL) {
@@ -610,22 +613,6 @@ static int vpu_get_clk(struct vpu_service_info *pservice)
 	return 0;
 #else
 	return 0;
-#endif
-}
-
-static void vpu_put_clk(struct vpu_service_info *pservice)
-{
-#if VCODEC_CLOCK_ENABLE
-	if (pservice->pd_video)
-		devm_clk_put(pservice->dev, pservice->pd_video);
-	if (pservice->aclk_vcodec)
-		devm_clk_put(pservice->dev, pservice->aclk_vcodec);
-	if (pservice->hclk_vcodec)
-		devm_clk_put(pservice->dev, pservice->hclk_vcodec);
-	if (pservice->clk_core)
-		devm_clk_put(pservice->dev, pservice->clk_core);
-	if (pservice->clk_cabac)
-		devm_clk_put(pservice->dev, pservice->clk_cabac);
 #endif
 }
 
@@ -828,7 +815,7 @@ static void vpu_service_power_on(struct vpu_service_info *pservice)
 	pr_info("%s: power on\n", dev_name(pservice->dev));
 
 #define BIT_VCODEC_CLK_SEL	(1<<10)
-	if (cpu_is_rk312x())
+	if (of_machine_is_compatible("rockchip,rk3126"))
 		writel_relaxed(readl_relaxed(RK_GRF_VIRT + RK312X_GRF_SOC_CON1)
 			| BIT_VCODEC_CLK_SEL | (BIT_VCODEC_CLK_SEL << 16),
 			RK_GRF_VIRT + RK312X_GRF_SOC_CON1);
@@ -1180,7 +1167,7 @@ static int vcodec_reg_address_translate(struct vpu_subdev_data *data,
 static void get_reg_freq(struct vpu_subdev_data *data, struct vpu_reg *reg)
 {
 
-	if (!soc_is_rk2928g()) {
+	if (!of_machine_is_compatible("rockchip,rk2928g")) {
 		if (reg->type == VPU_DEC || reg->type == VPU_DEC_PP) {
 			if (reg_check_fmt(reg) == VPU_DEC_FMT_H264) {
 				if (reg_probe_width(reg) > 3200) {
@@ -1438,7 +1425,7 @@ static void vpu_service_set_freq(struct vpu_service_info *pservice,
 	default: {
 		unsigned long rate = 300*MHZ;
 
-		if (soc_is_rk2928g())
+		if (of_machine_is_compatible("rockchip,rk2928g"))
 			rate = 400*MHZ;
 
 		clk_set_rate(pservice->aclk_vcodec, rate);
@@ -2373,7 +2360,7 @@ static int vcodec_subdev_probe(struct platform_device *pdev,
 	}
 
 	data->child_dev = device_create(data->cls, dev,
-		data->dev_t, NULL, name);
+		data->dev_t, "%s", name);
 
 	platform_set_drvdata(pdev, data);
 
@@ -2581,7 +2568,6 @@ static int vcodec_probe(struct platform_device *pdev)
 err:
 	pr_info("init failed\n");
 	vpu_service_power_off(pservice);
-	vpu_put_clk(pservice);
 	wake_lock_destroy(&pservice->wake_lock);
 
 	return ret;
@@ -2646,9 +2632,11 @@ static void get_hw_info(struct vpu_subdev_data *data)
 	struct vpu_dec_config *dec = &pservice->dec_config;
 	struct vpu_enc_config *enc = &pservice->enc_config;
 
-	if (cpu_is_rk2928() || cpu_is_rk3036() ||
-	    cpu_is_rk30xx() || cpu_is_rk312x() ||
-	    cpu_is_rk3188())
+	if (of_machine_is_compatible("rockchip,rk2928") ||
+			of_machine_is_compatible("rockchip,rk3036") ||
+			of_machine_is_compatible("rockchip,rk3066") ||
+			of_machine_is_compatible("rockchip,rk3126") ||
+			of_machine_is_compatible("rockchip,rk3188"))
 		dec->max_dec_pic_width = 1920;
 	else
 		dec->max_dec_pic_width = 4096;
@@ -2671,7 +2659,7 @@ static void get_hw_info(struct vpu_subdev_data *data)
 		dec->reserve = 0;
 		dec->mvc_support = 1;
 
-		if (!cpu_is_rk3036()) {
+		if (!of_machine_is_compatible("rockchip,rk3036")) {
 			u32 config_reg = readl_relaxed(data->enc_dev.regs + 63);
 
 			enc->max_encoded_width = config_reg & ((1 << 11) - 1);
@@ -2689,7 +2677,8 @@ static void get_hw_info(struct vpu_subdev_data *data)
 		vpu_debug(DEBUG_EXTRA_INFO, "vpu_service set to auto frequency mode\n");
 		atomic_set(&pservice->freq_status, VPU_FREQ_BUT);
 
-		pservice->bug_dec_addr = cpu_is_rk30xx();
+		pservice->bug_dec_addr = of_machine_is_compatible
+			("rockchip,rk30xx");
 	} else if (data->mode == VCODEC_RUNNING_MODE_RKVDEC) {
 		pservice->auto_freq = true;
 		atomic_set(&pservice->freq_status, VPU_FREQ_BUT);
@@ -2900,7 +2889,7 @@ static void __exit vcodec_service_exit(void)
 
 module_init(vcodec_service_init);
 module_exit(vcodec_service_exit);
-MODULE_LICENSE("Proprietary");
+MODULE_LICENSE("GPL v2");
 
 #ifdef CONFIG_DEBUG_FS
 #include <linux/seq_file.h>
