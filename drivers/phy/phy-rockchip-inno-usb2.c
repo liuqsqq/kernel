@@ -648,7 +648,7 @@ static void rockchip_usb2phy_otg_sm_work(struct work_struct *work)
 				case POWER_SUPPLY_TYPE_USB_FLOATING:
 					dev_dbg(&rport->phy->dev,
 						"floating cable is connecetd\n");
-					cable = EXTCON_CHG_USB_SLOW;
+					cable = EXTCON_CHG_USB_DCP;
 					rockchip_usb2phy_power_off(rport->phy);
 					sch_work = true;
 					break;
@@ -795,7 +795,7 @@ static void rockchip_chg_detect_work(struct work_struct *work)
 			delay = CHG_SECONDARY_DET_TIME;
 			rphy->chg_state = USB_CHG_STATE_PRIMARY_DONE;
 		} else {
-			if (tmout) {
+			if (rphy->dcd_retries == CHG_DCD_MAX_RETRIES) {
 				/* floating charger found */
 				rphy->chg_type = POWER_SUPPLY_TYPE_USB_FLOATING;
 				rphy->chg_state = USB_CHG_STATE_DETECTED;
@@ -1343,7 +1343,7 @@ static const struct rockchip_usb2phy_cfg rk3399_phy_cfgs[] = {
 		.clkout_ctl	= { 0xe450, 4, 4, 1, 0 },
 		.port_cfgs	= {
 			[USB2PHY_PORT_OTG] = {
-				.phy_sus	= { 0xe454, 1, 0, 2, 1 },
+				.phy_sus = { 0xe454, 15, 0, 0x1452, 0x15d1 },
 				.bvalid_det_en	= { 0xe3c0, 3, 3, 0, 1 },
 				.bvalid_det_st	= { 0xe3e0, 3, 3, 0, 1 },
 				.bvalid_det_clr	= { 0xe3d0, 3, 3, 0, 1 },
@@ -1385,7 +1385,7 @@ static const struct rockchip_usb2phy_cfg rk3399_phy_cfgs[] = {
 		.clkout_ctl	= { 0xe460, 4, 4, 1, 0 },
 		.port_cfgs	= {
 			[USB2PHY_PORT_OTG] = {
-				.phy_sus        = { 0xe464, 1, 0, 2, 1 },
+				.phy_sus = { 0xe464, 15, 0, 0x1452, 0x15d1 },
 				.bvalid_det_en  = { 0xe3c0, 8, 8, 0, 1 },
 				.bvalid_det_st  = { 0xe3e0, 8, 8, 0, 1 },
 				.bvalid_det_clr = { 0xe3d0, 8, 8, 0, 1 },

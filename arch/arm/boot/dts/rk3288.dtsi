@@ -54,6 +54,7 @@
 	interrupt-parent = <&gic>;
 
 	aliases {
+		ethernet0 = &gmac;
 		i2c0 = &i2c0;
 		i2c1 = &i2c1;
 		i2c2 = &i2c2;
@@ -204,15 +205,6 @@
 		#clock-cells = <0>;
 	};
 
-	edp_phy: edp-phy {
-		compatible = "rockchip,rk3288-dp-phy";
-		clocks = <&cru SCLK_EDP_24M>;
-		clock-names = "24m";
-		rockchip,grf = <&grf>;
-		#phy-cells = <0>;
-		status = "disabled";
-	};
-
 	timer {
 		compatible = "arm,armv7-timer";
 		arm,cpu-registers-not-fw-configured;
@@ -292,6 +284,8 @@
 		#io-channel-cells = <1>;
 		clocks = <&cru SCLK_SARADC>, <&cru PCLK_SARADC>;
 		clock-names = "saradc", "apb_pclk";
+		resets = <&cru SRST_SARADC>;
+		reset-names = "saradc-apb";
 		status = "disabled";
 	};
 
@@ -458,7 +452,78 @@
 	};
 
 	thermal-zones {
-		#include "rk3288-thermal.dtsi"
+		reserve_thermal: reserve_thermal {
+			polling-delay-passive = <1000>; /* milliseconds */
+			polling-delay = <5000>; /* milliseconds */
+
+			thermal-sensors = <&tsadc 0>;
+		};
+
+		cpu_thermal: cpu_thermal {
+			polling-delay-passive = <100>; /* milliseconds */
+			polling-delay = <5000>; /* milliseconds */
+
+			thermal-sensors = <&tsadc 1>;
+
+			trips {
+				cpu_alert0: cpu_alert0 {
+					temperature = <70000>; /* millicelsius */
+					hysteresis = <2000>; /* millicelsius */
+					type = "passive";
+				};
+				cpu_alert1: cpu_alert1 {
+					temperature = <75000>; /* millicelsius */
+					hysteresis = <2000>; /* millicelsius */
+					type = "passive";
+				};
+				cpu_crit: cpu_crit {
+					temperature = <90000>; /* millicelsius */
+					hysteresis = <2000>; /* millicelsius */
+					type = "critical";
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&cpu_alert0>;
+					cooling-device =
+						<&cpu0 THERMAL_NO_LIMIT 6>;
+				};
+				map1 {
+					trip = <&cpu_alert1>;
+					cooling-device =
+						<&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+				};
+			};
+		};
+
+		gpu_thermal: gpu_thermal {
+			polling-delay-passive = <100>; /* milliseconds */
+			polling-delay = <5000>; /* milliseconds */
+
+			thermal-sensors = <&tsadc 2>;
+
+			trips {
+				gpu_alert0: gpu_alert0 {
+					temperature = <70000>; /* millicelsius */
+					hysteresis = <2000>; /* millicelsius */
+					type = "passive";
+				};
+				gpu_crit: gpu_crit {
+					temperature = <90000>; /* millicelsius */
+					hysteresis = <2000>; /* millicelsius */
+					type = "critical";
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&gpu_alert0>;
+					cooling-device =
+						<&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+				};
+			};
+		};
 	};
 
 	tsadc: tsadc@ff280000 {
@@ -481,8 +546,9 @@
 	gmac: ethernet@ff290000 {
 		compatible = "rockchip,rk3288-gmac";
 		reg = <0xff290000 0x10000>;
-		interrupts = <GIC_SPI 27 IRQ_TYPE_LEVEL_HIGH>;
-		interrupt-names = "macirq";
+		interrupts = <GIC_SPI 27 IRQ_TYPE_LEVEL_HIGH>,
+				<GIC_SPI 28 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "macirq", "eth_wake_irq";
 		rockchip,grf = <&grf>;
 		clocks = <&cru SCLK_MAC>,
 			<&cru SCLK_MAC_RX>, <&cru SCLK_MAC_TX>,
@@ -740,7 +806,7 @@
 			 *	*_HDMI		HDMI
 			 *	*_MIPI_*	MIPI
 			 */
-			pd_vio {
+			pd_vio@RK3288_PD_VIO {
 				reg = <RK3288_PD_VIO>;
 				clocks = <&cru ACLK_IEP>,
 					 <&cru ACLK_ISP>,
@@ -782,7 +848,7 @@
 			 * Note: The following 3 are HEVC(H.265) clocks,
 			 * and on the ACLK_HEVC_NIU (NOC).
 			 */
-			pd_hevc {
+			pd_hevc@RK3288_PD_HEVC {
 				reg = <RK3288_PD_HEVC>;
 				clocks = <&cru ACLK_HEVC>,
 					 <&cru SCLK_HEVC_CABAC>,
@@ -796,7 +862,7 @@
 			 * (video endecoder & decoder) clocks that on the
 			 * ACLK_VCODEC_NIU and HCLK_VCODEC_NIU (NOC).
 			 */
-			pd_video {
+			pd_video@RK3288_PD_VIDEO {
 				reg = <RK3288_PD_VIDEO>;
 				clocks = <&cru ACLK_VCODEC>,
 					 <&cru HCLK_VCODEC>;
@@ -807,7 +873,7 @@
 			 * Note: ACLK_GPU is the GPU clock,
 			 * and on the ACLK_GPU_NIU (NOC).
 			 */
-			pd_gpu {
+			pd_gpu@RK3288_PD_GPU {
 				reg = <RK3288_PD_GPU>;
 				clocks = <&cru ACLK_GPU>;
 				pm_qos = <&qos_gpu_r>,
@@ -853,8 +919,56 @@
 	};
 
 	grf: syscon@ff770000 {
-		compatible = "rockchip,rk3288-grf", "syscon";
+		compatible = "rockchip,rk3288-grf", "syscon", "simple-mfd";
 		reg = <0xff770000 0x1000>;
+
+		edp_phy: edp-phy {
+			compatible = "rockchip,rk3288-dp-phy";
+			clocks = <&cru SCLK_EDP_24M>;
+			clock-names = "24m";
+			#phy-cells = <0>;
+			status = "disabled";
+		};
+
+		io_domains: io-domains {
+			compatible = "rockchip,rk3288-io-voltage-domain";
+			status = "disabled";
+		};
+
+		usbphy: usbphy {
+			compatible = "rockchip,rk3288-usb-phy";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+
+			usbphy0: usb-phy@320 {
+				#phy-cells = <0>;
+				reg = <0x320>;
+				clocks = <&cru SCLK_OTGPHY0>;
+				clock-names = "phyclk";
+				#clock-cells = <0>;
+				resets = <&cru SRST_USBOTG_PHY>;
+				reset-names = "phy-reset";
+			};
+
+			usbphy1: usb-phy@334 {
+				#phy-cells = <0>;
+				reg = <0x334>;
+				clocks = <&cru SCLK_OTGPHY1>;
+				clock-names = "phyclk";
+				#clock-cells = <0>;
+			};
+
+			usbphy2: usb-phy@348 {
+				#phy-cells = <0>;
+				reg = <0x348>;
+				clocks = <&cru SCLK_OTGPHY2>;
+				clock-names = "phyclk";
+				#clock-cells = <0>;
+				resets = <&cru SRST_USBHOST1_PHY>;
+				reset-names = "phy-reset";
+			};
+		};
 	};
 
 	wdt: watchdog@ff800000 {
@@ -892,6 +1006,8 @@
 		clocks = <&cru HCLK_I2S0>, <&cru SCLK_I2S0>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&i2s0_bus>;
+		rockchip,playback-channels = <8>;
+		rockchip,capture-channels = <2>;
 		status = "disabled";
 	};
 
@@ -998,16 +1114,13 @@
 		interrupts = <GIC_SPI 83 IRQ_TYPE_LEVEL_HIGH>;
 		clocks = <&cru SCLK_MIPIDSI_24M>, <&cru PCLK_MIPI_DSI0>;
 		clock-names = "ref", "pclk";
+		power-domains = <&power RK3288_PD_VIO>;
 		rockchip,grf = <&grf>;
 		#address-cells = <1>;
 		#size-cells = <0>;
 		status = "disabled";
 
 		ports {
-			#address-cells = <1>;
-			#size-cells = <0>;
-			reg = <1>;
-
 			mipi_in: port {
 				#address-cells = <1>;
 				#size-cells = <0>;
@@ -1193,6 +1306,16 @@
 			<&cru SCLK_HEVC_CABAC>;
 		clock-names = "aclk_vcodec", "hclk_vcodec", "clk_core",
 			"clk_cabac";
+		/*
+		 * The 4K hevc would also work well with 500/125/300/300,
+		 * no more err irq and reset request.
+		 */
+		assigned-clocks = <&cru ACLK_HEVC>, <&cru HCLK_HEVC>,
+				  <&cru SCLK_HEVC_CORE>,
+				  <&cru SCLK_HEVC_CABAC>;
+		assigned-clock-rates = <400000000>, <100000000>,
+				       <300000000>, <300000000>;
+
 		resets = <&cru SRST_HEVC>;
 		reset-names = "video";
 		power-domains = <&power RK3288_PD_HEVC>;
@@ -1238,33 +1361,24 @@
 		};
 	};
 
-	usbphy: phy {
-		compatible = "rockchip,rk3288-usb-phy";
+	cif_isp0: cif_isp@ff910000 {
+		compatible = "rockchip,rk3288-cif-isp";
 		rockchip,grf = <&grf>;
-		#address-cells = <1>;
-		#size-cells = <0>;
+		reg = <0xff910000 0x10000>, <0xff968000 0x4000>;
+		reg-names = "register", "csihost-register";
+		clocks = <&cru ACLK_ISP>, <&cru HCLK_ISP>,
+			<&cru SCLK_ISP>, <&cru SCLK_ISP_JPE>,
+			<&cru PCLK_MIPI_CSI>, <&cru PCLK_ISP_IN>,
+			<&cru SCLK_MIPIDSI_24M>;
+		clock-names = "aclk_isp", "hclk_isp",
+			"sclk_isp", "sclk_isp_jpe",
+			"pclk_mipi_csi", "pclk_isp_in",
+			"sclk_mipidsi_24m";
+		resets = <&cru SRST_ISP>;
+		reset-names = "rst_isp";
+		interrupts = <GIC_SPI 14 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "cif_isp10_irq";
 		status = "disabled";
-
-		usbphy0: usb-phy0 {
-			#phy-cells = <0>;
-			reg = <0x320>;
-			clocks = <&cru SCLK_OTGPHY0>;
-			clock-names = "phyclk";
-		};
-
-		usbphy1: usb-phy1 {
-			#phy-cells = <0>;
-			reg = <0x334>;
-			clocks = <&cru SCLK_OTGPHY1>;
-			clock-names = "phyclk";
-		};
-
-		usbphy2: usb-phy2 {
-			#phy-cells = <0>;
-			reg = <0x348>;
-			clocks = <&cru SCLK_OTGPHY2>;
-			clock-names = "phyclk";
-		};
 	};
 
 	pinctrl: pinctrl {
@@ -1833,6 +1947,22 @@
 		spdif {
 			spdif_tx: spdif-tx {
 				rockchip,pins = <RK_GPIO6 11 RK_FUNC_1 &pcfg_pull_none>;
+			};
+		};
+
+		cif {
+			cif_dvp_d2d9: cif-dvp-d2d9 {
+				rockchip,pins = <2 0 RK_FUNC_1 &pcfg_pull_none>,
+						<2 1 RK_FUNC_1 &pcfg_pull_none>,
+						<2 2 RK_FUNC_1 &pcfg_pull_none>,
+						<2 3 RK_FUNC_1 &pcfg_pull_none>,
+						<2 4 RK_FUNC_1 &pcfg_pull_none>,
+						<2 5 RK_FUNC_1 &pcfg_pull_none>,
+						<2 6 RK_FUNC_1 &pcfg_pull_none>,
+						<2 7 RK_FUNC_1 &pcfg_pull_none>,
+						<2 8 RK_FUNC_1 &pcfg_pull_none>,
+						<2 9 RK_FUNC_1 &pcfg_pull_none>,
+						<2 11 RK_FUNC_1 &pcfg_pull_none>;
 			};
 		};
 	};
