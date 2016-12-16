@@ -1285,6 +1285,7 @@
 		iommu_enabled = <1>;
 		dev_mode = <0>;
 		status = "disabled";
+		allocator = <1>;
 	};
 
 	vpu_mmu: iommu@ff9a0800 {
@@ -1324,6 +1325,7 @@
 		iommus = <&hevc_mmu>;
 		iommu_enabled = <1>;
 		status = "disabled";
+		allocator = <1>;
 	};
 
 	hevc_mmu: iommu@ff9c0440 {
