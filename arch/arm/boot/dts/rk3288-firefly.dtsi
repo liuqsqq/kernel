@@ -729,9 +729,14 @@
 	status = "okay";
 };
 
-&vpu {
+//&vpu {
+&hevc_service {
 	status = "okay";
 };
+
+&vpu_service {
+	status = "okay";
+}
 
 &wdt {
 	status = "okay";
