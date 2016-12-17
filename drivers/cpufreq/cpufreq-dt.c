@@ -300,6 +300,12 @@ static int cpufreq_exit(struct cpufreq_policy *policy)
 	struct cpumask cpus;
 	struct private_data *priv = policy->driver_data;
 
+#ifdef CONFIG_ARCH_ROCKCHIP
+	cpumask_set_cpu(policy->cpu, policy->cpus);
+	if (cpufreq_generic_suspend(policy))
+		pr_err("%s: Failed to suspend driver: %p\n", __func__, policy);
+	cpumask_clear_cpu(policy->cpu, policy->cpus);
+#endif
 	priv->cpu_dev = get_cpu_device(policy->cpu);
 	cpufreq_cooling_unregister(priv->cdev);
 	dev_pm_opp_free_cpufreq_table(priv->cpu_dev, &policy->freq_table);
@@ -349,8 +355,11 @@ static void cpufreq_ready(struct cpufreq_policy *policy)
 }
 
 static struct cpufreq_driver dt_cpufreq_driver = {
-	.flags = CPUFREQ_STICKY | CPUFREQ_NEED_INITIAL_FREQ_CHECK |
-		 CPUFREQ_HAVE_GOVERNOR_PER_POLICY,
+#ifdef CONFIG_ARCH_ROCKCHIP
+	.flags = CPUFREQ_STICKY | CPUFREQ_HAVE_GOVERNOR_PER_POLICY,
+#else
+	.flags = CPUFREQ_STICKY | CPUFREQ_NEED_INITIAL_FREQ_CHECK,
+#endif
 	.verify = cpufreq_generic_frequency_table_verify,
 	.target_index = set_target,
 	.get = cpufreq_generic_get,

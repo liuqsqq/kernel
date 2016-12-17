@@ -708,6 +708,7 @@ struct drm_connector {
 	bool override_edid;
 	uint32_t encoder_ids[DRM_CONNECTOR_MAX_ENCODER];
 	struct drm_encoder *encoder; /* currently active encoder */
+	bool loader_protect;
 
 	/* EDID bits */
 	uint8_t eld[MAX_ELD_BYTES];
@@ -1511,6 +1512,7 @@ extern int drm_mode_atomic_ioctl(struct drm_device *dev,
 extern void drm_fb_get_bpp_depth(uint32_t format, unsigned int *depth,
 				 int *bpp);
 extern int drm_format_num_planes(uint32_t format);
+extern int drm_format_plane_bpp(uint32_t format, int plane);
 extern int drm_format_plane_cpp(uint32_t format, int plane);
 extern int drm_format_horz_chroma_subsampling(uint32_t format);
 extern int drm_format_vert_chroma_subsampling(uint32_t format);

@@ -19,6 +19,7 @@
 #include <drm/drm_fb_helper.h>
 #include <drm/drm_crtc_helper.h>
 #include <linux/memblock.h>
+#include <linux/iommu.h>
 
 #include "rockchip_drm_drv.h"
 #include "rockchip_drm_gem.h"
@@ -46,6 +47,7 @@ dma_addr_t rockchip_fb_get_dma_addr(struct drm_framebuffer *fb,
 static void rockchip_drm_fb_destroy(struct drm_framebuffer *fb)
 {
 	struct rockchip_drm_fb *rockchip_fb = to_rockchip_fb(fb);
+	struct rockchip_drm_private *private = fb->dev->dev_private;
 	struct drm_gem_object *obj;
 	int i;
 
@@ -63,8 +65,14 @@ static void rockchip_drm_fb_destroy(struct drm_framebuffer *fb)
 			void *start = phys_to_virt(logo->start);
 			void *end = phys_to_virt(logo->size);
 
-			dma_unmap_sg(fb->dev->dev, logo->sgt->sgl,
-				     logo->sgt->nents, DMA_TO_DEVICE);
+			if (private && private->domain) {
+				iommu_unmap(private->domain, logo->dma_addr,
+					    logo->size);
+				drm_mm_remove_node(&logo->mm);
+			} else {
+				dma_unmap_sg(fb->dev->dev, logo->sgt->sgl,
+					     logo->sgt->nents, DMA_TO_DEVICE);
+			}
 			sg_free_table(logo->sgt);
 			memblock_free(logo->start, logo->size);
 			free_reserved_area(start, end, -1, "drm_logo");
@@ -168,6 +176,8 @@ rockchip_user_fb_create(struct drm_device *dev, struct drm_file *file_priv,
 		unsigned int width = mode_cmd->width / (i ? hsub : 1);
 		unsigned int height = mode_cmd->height / (i ? vsub : 1);
 		unsigned int min_size;
+		unsigned int bpp =
+			drm_format_plane_bpp(mode_cmd->pixel_format, i);
 
 		obj = drm_gem_object_lookup(dev, file_priv,
 					    mode_cmd->handles[i]);
@@ -178,9 +188,7 @@ rockchip_user_fb_create(struct drm_device *dev, struct drm_file *file_priv,
 		}
 
 		min_size = (height - 1) * mode_cmd->pitches[i] +
-			mode_cmd->offsets[i] +
-			width * drm_format_plane_cpp(mode_cmd->pixel_format, i);
-
+			mode_cmd->offsets[i] + roundup(width * bpp, 8) / 8;
 		if (obj->size < min_size) {
 			drm_gem_object_unreference_unlocked(obj);
 			ret = -EINVAL;
@@ -382,8 +390,8 @@ void rockchip_drm_mode_config_init(struct drm_device *dev)
 	 * this value would be used to check framebuffer size limitation
 	 * at drm_mode_addfb().
 	 */
-	dev->mode_config.max_width = 4096;
-	dev->mode_config.max_height = 4096;
+	dev->mode_config.max_width = 8192;
+	dev->mode_config.max_height = 8192;
 
 	dev->mode_config.funcs = &rockchip_drm_mode_config_funcs;
 }

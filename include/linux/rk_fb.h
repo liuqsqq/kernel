@@ -118,6 +118,11 @@ enum {
 #define BT709(x)	((CSC_BT709 << CSC_SHIFT) | ((x) & ~CSC_MASK))
 #define BT2020(x)	((CSC_BT2020 << CSC_SHIFT) | ((x) & ~CSC_MASK))
 
+enum {
+	SDR_DATA,
+	HDR_DATA,
+};
+
 /**
  * pixel format definitions,this is copy from android/system/core/include/system/graphics.h
  */
@@ -278,7 +283,9 @@ typedef enum {
 typedef enum {
 	GET_PAGE_FAULT	= 0x0,
 	CLR_PAGE_FAULT  = 0x1,
-	UNMASK_PAGE_FAULT = 0x2
+	UNMASK_PAGE_FAULT = 0x2,
+	UPDATE_CABC_PWM = 0x3,
+	SET_DSP_MIRROR = 0x4
 } extern_func;
 
 enum rk_vop_feature {
@@ -395,6 +402,7 @@ struct rk_lcdc_bcsh {
 struct rk_lcdc_win_area {
 	bool state;
 	enum data_format format;
+	u8 data_space;		/* SDR or HDR */
 	u8 fmt_cfg;
 	u8 yuyv_fmt;
 	u8 swap_rb;
@@ -496,6 +504,8 @@ struct rk_fb_trsm_ops {
 	int (*disable)(void);
 	int (*dsp_pwr_on) (void);
 	int (*dsp_pwr_off) (void);
+	void (*refresh)(unsigned int xpos, unsigned int ypos,
+		       unsigned int xsize, unsigned int ysize);
 };
 
 struct rk_lcdc_drv_ops {
@@ -578,8 +588,8 @@ struct rk_fb_area_par {
 	u8  fbdc_en;
 	u8  fbdc_cor_en;
 	u8  fbdc_data_format;
-	u16 reserved0;
-	u32 reserved1;
+	u16 data_space;	/* SDR or HDR */
+	u32 reserved0;
 };
 
 
@@ -614,6 +624,7 @@ struct rk_fb_reg_wb_data {
 struct rk_fb_reg_area_data {
 	struct sync_fence *acq_fence;
 	u8 data_format;        /*layer data fmt*/
+	u8 data_space;		/* indicate SDR or HDR */
 	u8  index_buf;          /*judge if the buffer is index*/
 	u32 y_offset;		/*yuv/rgb offset  -->LCDC_WINx_YRGB_MSTx*/
 	u32 c_offset;		/*cb cr offset--->LCDC_WINx_CBR_MSTx*/
@@ -670,6 +681,7 @@ struct rk_fb_reg_data {
 
 struct rk_lcdc_driver {
 	char name[6];
+	int  te_irq;
 	int  id;
 	int  prop;
 	struct device *dev;
@@ -689,6 +701,7 @@ struct rk_lcdc_driver {
 	u16 rotate_mode;
 	u16 cabc_mode;
 	u16 overlay_mode;
+	u16 pre_overlay;
 	u16 output_color;
 
 	u16  fb_win_map;

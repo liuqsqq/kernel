@@ -88,6 +88,7 @@ static const int dw_hdmi_rates[] = {
 	154000000,
 	162000000,
 	297000000,
+	594000000,
 };
 
 /*
@@ -393,6 +394,7 @@ dw_hdmi_rockchip_encoder_atomic_check(struct drm_encoder *encoder,
 
 	s->output_mode = ROCKCHIP_OUT_MODE_AAAA;
 	s->output_type = DRM_MODE_CONNECTOR_HDMIA;
+	s->bus_format = MEDIA_BUS_FMT_RGB888_1X24;
 
 	return 0;
 }

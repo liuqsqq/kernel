@@ -169,6 +169,8 @@ rockchip_dp_drm_encoder_atomic_check(struct drm_encoder *encoder,
 				      struct drm_connector_state *conn_state)
 {
 	struct rockchip_crtc_state *s = to_rockchip_crtc_state(crtc_state);
+	struct drm_connector *connector = conn_state->connector;
+	struct drm_display_info *info = &connector->display_info;
 
 	/*
 	 * The hardware IC designed that VOP must output the RGB10 video
@@ -179,6 +181,8 @@ rockchip_dp_drm_encoder_atomic_check(struct drm_encoder *encoder,
 	 */
 	s->output_mode = ROCKCHIP_OUT_MODE_AAAA;
 	s->output_type = DRM_MODE_CONNECTOR_eDP;
+	if (info->num_bus_formats)
+		s->bus_format = info->bus_formats[0];
 
 	return 0;
 }
@@ -230,12 +234,6 @@ static int rockchip_dp_init(struct rockchip_dp_device *dp)
 		return ret;
 	}
 
-	ret = rockchip_dp_pre_init(dp);
-	if (ret < 0) {
-		dev_err(dp->dev, "failed to pre init %d\n", ret);
-		return ret;
-	}
-
 	return 0;
 }
 
@@ -267,9 +265,37 @@ static int rockchip_dp_bind(struct device *dev, struct device *master,
 {
 	struct rockchip_dp_device *dp = dev_get_drvdata(dev);
 	const struct rockchip_dp_chip_data *dp_data;
+	struct device_node *panel_node, *port, *endpoint;
+	struct drm_panel *panel = NULL;
 	struct drm_device *drm_dev = data;
 	int ret;
 
+	port = of_graph_get_port_by_id(dev->of_node, 1);
+	if (port) {
+		endpoint = of_get_child_by_name(port, "endpoint");
+		of_node_put(port);
+		if (!endpoint) {
+			dev_err(dev, "no output endpoint found\n");
+			return -EINVAL;
+		}
+
+		panel_node = of_graph_get_remote_port_parent(endpoint);
+		of_node_put(endpoint);
+		if (!panel_node) {
+			dev_err(dev, "no output node found\n");
+			return -EINVAL;
+		}
+
+		panel = of_drm_find_panel(panel_node);
+		if (!panel) {
+			DRM_ERROR("failed to find panel\n");
+			of_node_put(panel_node);
+			return -EPROBE_DEFER;
+		}
+		of_node_put(panel_node);
+	}
+
+	dp->plat_data.panel = panel;
 	/*
 	 * Just like the probe function said, we don't need the
 	 * device drvrate anymore, we should leave the charge to
@@ -319,42 +345,13 @@ static const struct component_ops rockchip_dp_component_ops = {
 static int rockchip_dp_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
-	struct device_node *panel_node, *port, *endpoint;
-	struct drm_panel *panel = NULL;
 	struct rockchip_dp_device *dp;
-
-	port = of_graph_get_port_by_id(dev->of_node, 1);
-	if (port) {
-		endpoint = of_get_child_by_name(port, "endpoint");
-		of_node_put(port);
-		if (!endpoint) {
-			dev_err(dev, "no output endpoint found\n");
-			return -EINVAL;
-		}
-
-		panel_node = of_graph_get_remote_port_parent(endpoint);
-		of_node_put(endpoint);
-		if (!panel_node) {
-			dev_err(dev, "no output node found\n");
-			return -EINVAL;
-		}
-
-		panel = of_drm_find_panel(panel_node);
-		if (!panel) {
-			DRM_ERROR("failed to find panel\n");
-			of_node_put(panel_node);
-			return -EPROBE_DEFER;
-		}
-		of_node_put(panel_node);
-	}
 
 	dp = devm_kzalloc(dev, sizeof(*dp), GFP_KERNEL);
 	if (!dp)
 		return -ENOMEM;
 
 	dp->dev = dev;
-
-	dp->plat_data.panel = panel;
 
 	/*
 	 * We just use the drvdata until driver run into component

@@ -1333,12 +1333,7 @@ void dwc2_hcd_complete_xfer_ddma(struct dwc2_hsotg *hsotg,
 			/* Keep in assigned schedule to continue transfer */
 			list_move_tail(&qh->qh_list_entry,
 				       &hsotg->periodic_sched_assigned);
-			/*
-			 * If channel has been halted during giveback of urb
-			 * then prevent any new scheduling.
-			 */
-			if (!chan->halt_status)
-				continue_isoc_xfer = 1;
+			continue_isoc_xfer = 1;
 		}
 		/*
 		 * Todo: Consider the case when period exceeds FrameList size.

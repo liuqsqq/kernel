@@ -163,8 +163,7 @@ static void dwc2_sof_intr(struct dwc2_hsotg *hsotg)
 			 * (micro)frame
 			 */
 			list_move_tail(&qh->qh_list_entry,
-				  &hsotg->periodic_sched_ready);
-		}
+				       &hsotg->periodic_sched_ready);
 	}
 	tr_type = dwc2_hcd_select_transactions(hsotg);
 	if (tr_type != DWC2_TRANSACTION_NONE)
@@ -823,7 +822,7 @@ static void dwc2_halt_channel(struct dwc2_hsotg *hsotg,
 			 * processed.
 			 */
 			list_move_tail(&chan->qh->qh_list_entry,
-				  &hsotg->periodic_sched_assigned);
+				       &hsotg->periodic_sched_assigned);
 
 			/*
 			 * Make sure the Periodic Tx FIFO Empty interrupt is

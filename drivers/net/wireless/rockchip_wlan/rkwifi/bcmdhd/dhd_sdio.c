@@ -5353,6 +5353,10 @@ dhd_bus_init(dhd_pub_t *dhdp, bool enforce_mutex)
 
 
 	else {
+		if (dhdp->conf->chip == BCM4354_CHIP_ID) {
+			ret = -1;
+			goto exit;
+		}
 		/* Disable F2 again */
 		enable = SDIO_FUNC_ENABLE_1;
 		bcmsdh_cfg_write(bus->sdh, SDIO_FUNC_0, SDIOD_CCCR_IOEN, enable, NULL);
@@ -8380,7 +8384,7 @@ dhdsdio_download_firmware(struct dhd_bus *bus, osl_t *osh, void *sdh)
 	/* External conf takes precedence if specified */
 	dhd_conf_preinit(bus->dhd);
 	dhd_conf_read_config(bus->dhd, bus->dhd->conf_path);
-	dhd_conf_set_fw_name_by_chip(bus->dhd, bus->fw_path);
+	dhd_conf_set_fw_name_by_chip(bus->dhd, bus->fw_path, bus->nv_path);
 	dhd_conf_set_nv_name_by_chip(bus->dhd, bus->nv_path);
 	dhd_conf_set_fw_name_by_mac(bus->dhd, bus->sdh, bus->fw_path);
 	dhd_conf_set_nv_name_by_mac(bus->dhd, bus->sdh, bus->nv_path);

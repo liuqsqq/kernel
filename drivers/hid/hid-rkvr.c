@@ -21,6 +21,8 @@
 #include <linux/hidraw.h>
 #include <linux/input.h>
 #include <linux/platform_device.h>
+#include <linux/notifier.h>
+#include <linux/fb.h>
 #include "hid-rkvr.h"
 #include "hid-ids.h"
 
@@ -33,11 +35,16 @@
 #define RKVR_HIDRAW_BUFFER_SIZE 64
 #define RKVR_HIDRAW_MAX_DEVICES 8
 #define RKVR_FIRST_MINOR 0
+#define RK_HID_GEAR_TOUCH
 
 static struct class *rkvr_class;
 
 static struct hidraw *rkvr_hidraw_table[RKVR_HIDRAW_MAX_DEVICES];
 
+static struct hid_capability
+{
+	__u8 suspend_notify;
+} rkvr_hid_capability[RKVR_HIDRAW_MAX_DEVICES];
 static DEFINE_MUTEX(minors_lock);
 
 struct keymap_t {
@@ -51,19 +58,34 @@ struct keymap_t {
 	__u16 key_volup_down:1;
 	__u16 key_voldn_up:1;
 	__u16 key_voldn_down:1;
+	__u16 key_esc_up:1;
+	__u16 key_esc_down:1;
+	/*for touch panel **/
+	__u16 key_up_pressed:1;
+	__u16 key_up_released:1;
+	__u16 key_down_pressed:1;
+	__u16 key_down_released:1;
+	__u16 key_left_pressed:1;
+	__u16 key_left_released:1;
+	__u16 key_right_pressed:1;
+	__u16 key_right_released:1;
+	__u16 key_enter_pressed:1;
+	__u16 key_enter_released:1;
 	__u16 key_pressed:1;
-};
+	__u16 psensor_on:1;
+	__u16 psensor_off:1;
+} __packed;
 
 union rkvr_data_t {
 	struct rkvr_data {
 		__u8 buf_head[6];
 		__u8 buf_sensortemperature[2];
 		__u8 buf_sensor[40];
-		__u8 buf_reserve[12];
+		__u8 buf_reserve[10];
 		struct keymap_t key_map;
 	} rkvr_data;
 	__u8 buf[62];
-};
+} __packed;
 
 static int rkvr_major;
 static struct cdev rkvr_cdev;
@@ -71,7 +93,6 @@ static unsigned int count_array[15] = {0,};
 static unsigned long old_jiffy_array[15] = {0,};
 static int rkvr_index;
 static int opens;
-static char sync_string[64];
 
 struct sensor_hid_data {
 	void *priv;
@@ -122,6 +143,7 @@ static int inv_hid_register_devcie(struct rkvr_iio_hw_device *hw_device)
 		list_for_each_entry(p, &rkvr_hid_hw_device_list, l) {
 			if (!strcmp(hw_device->name, p->name)) {
 				pr_err("%s already exist ,abort\n", hw_device->name);
+				mutex_unlock(&device_list_lock);
 				return -1;
 			}
 		}
@@ -524,6 +546,43 @@ static int rkvr_keys_event(struct hid_device *hdev, void *data, unsigned long le
 		rkvr_send_key_event(input, KEY_VOLUMEDOWN, 0);
 	else if (rkvr_data->rkvr_data.key_map.key_voldn_down)
 		rkvr_send_key_event(input, KEY_VOLUMEDOWN, 1);
+	else if (rkvr_data->rkvr_data.key_map.key_esc_up)
+		rkvr_send_key_event(input, KEY_ESC, 0);
+	else if (rkvr_data->rkvr_data.key_map.key_esc_down)
+		rkvr_send_key_event(input, KEY_ESC, 1);
+	else if (rkvr_data->rkvr_data.key_map.key_up_pressed) {
+		rkvr_send_key_event(input, KEY_UP, 1);
+		rkvr_send_key_event(input, KEY_UP, 0);
+	} else if (rkvr_data->rkvr_data.key_map.key_down_pressed) {
+		rkvr_send_key_event(input, KEY_DOWN, 1);
+		rkvr_send_key_event(input, KEY_DOWN, 0);
+	} else if (rkvr_data->rkvr_data.key_map.key_left_pressed) {
+		rkvr_send_key_event(input, KEY_LEFT, 1);
+		rkvr_send_key_event(input, KEY_LEFT, 0);
+	} else if (rkvr_data->rkvr_data.key_map.key_right_pressed) {
+		rkvr_send_key_event(input, KEY_RIGHT, 1);
+		rkvr_send_key_event(input, KEY_RIGHT, 0);
+	} else if (rkvr_data->rkvr_data.key_map.key_enter_pressed) {
+		rkvr_send_key_event(input, KEY_ENTER, 1);
+		rkvr_send_key_event(input, KEY_ENTER, 0);
+#ifdef RK_HID_GEAR_TOUCH
+		input_event(input, EV_MSC, MSC_SCAN, 0x90001);
+		rkvr_send_key_event(input, 0x110, 1);
+		input_event(input, EV_MSC, MSC_SCAN, 0x90001);
+		rkvr_send_key_event(input, 0x110, 0);
+#endif
+	}
+
+	if (rkvr_data->rkvr_data.key_map.psensor_on) {
+		hid_info(hdev, "event: psensor_on\n");
+		rkvr_send_key_event(input, KEY_POWER, 1);
+		rkvr_send_key_event(input, KEY_POWER, 0);
+	} else if (rkvr_data->rkvr_data.key_map.psensor_off) {
+		hid_info(hdev, "event: psensor_off\n");
+		rkvr_send_key_event(input, KEY_POWER, 1);
+		rkvr_send_key_event(input, KEY_POWER, 0);
+	}
+
 	return 0;
 }
 
@@ -567,6 +626,51 @@ static int rkvr_report_event(struct hid_device *hid, u8 *data, int len)
 	return ret;
 }
 
+/******************************************
+ *--------------------
+ *| ID | BUF .....   |
+ *--------------------
+ *
+ ******************************************/
+static int rkvr_send_report(struct device *dev, unsigned char *data, size_t len)
+{
+	struct hid_device *hid = container_of(dev, struct hid_device, dev);
+	unsigned char reportnum = HID_REPORT_ID_RKVR;
+	unsigned char rtype = HID_OUTPUT_REPORT;
+	int ret = -EINVAL;
+
+	ret = hid_hw_raw_request(hid, reportnum, (unsigned char *)data, len, rtype, HID_REQ_SET_REPORT);
+	if (ret != len) {
+		hid_err(hid, "rkvr_send_report fail\n");
+		ret = -EIO;
+		goto fail;
+	}
+	hid_info(hid, "rkvr_send_report ok\n");
+	ret = 0;
+fail:
+	return ret;
+}
+
+static int rkvr_recv_report(struct device *dev, u8 type, u8 *data, int len)
+{
+	struct hid_device *hid = container_of(dev, struct hid_device, dev);
+	unsigned char report_number = type;
+	unsigned char report_type = HID_MISC_REPORT;
+	char buf[1 + sizeof(*data) * len];
+	int readlen = 1 + sizeof(*data) * len;
+	int ret;
+
+	ret = hid_hw_raw_request(hid, report_number, (unsigned char *)buf, readlen, report_type, HID_REQ_GET_REPORT);
+	if (ret != readlen) {
+		hid_info(hid, "rkvr_recv_report fail\n");
+		return -1;
+	}
+	memcpy(data, &buf[1], len);
+	hid_info(hid, "rkvr_recv_report %02x\n", type);
+
+	return 0;
+}
+
 /*
  * for enable sensor data
  ************************************
@@ -577,68 +681,80 @@ static int rkvr_report_event(struct hid_device *hid, u8 *data, int len)
  ***********************************
  */
 
-static int hid_report_sync(struct device *dev, const char *data, size_t len)
+static int hid_report_sync(struct device *dev, const char *data, size_t count)
 {
 	struct hid_device *hid = container_of(dev, struct hid_device, dev);
 	u64 *tmp;
-	unsigned char buf[64];
+	unsigned char buf[64] = {HID_REPORT_ID_RKVR, RKVR_ID_SYNC};
 	unsigned char buf2[3] = {0};
 	char *colon;
 	int i, ret = 0;
 	char *p;
-	unsigned char report_number = HID_REPORT_ID_CRYP;
-	unsigned char report_type = HID_SYNCW_REPORT;
+	size_t len;
 
-	p = kmalloc(sizeof(*p) * len, GFP_KERNEL);
+	p = kmalloc(sizeof(*p) * count, GFP_KERNEL);
 	if (!p) {
 		hid_err(hid, "no mem\n");
 		return -ENOMEM;
 	}
-	memcpy(p, data, len);
-	colon = strchr(p, ':');
+	memcpy(p, data, count);
+	colon = strnchr(p, count, ':');
 	if (!colon) {
 		hid_err(hid, "must have conlon\n");
 		ret = -EINVAL;
 		goto fail;
 	}
-	if (colon - p + 1 >= len) {
+	if (colon - p + 1 >= count) {
 		hid_err(hid, "must have sync string after conlon\n");
 		ret = -EINVAL;
 		goto fail;
 	}
 	colon[0] = 0;
 	colon++;
-	tmp = (u64 *)(buf + 1);
+	tmp = (u64 *)(buf + 2);
 	if (kstrtoull(p, 10, tmp)) {
 		hid_err(hid, "convert rand string fail,only decimal string allowed\n");
 		ret = -EINVAL;
 		goto fail;
 	}
-	len = min((len - (colon - p)) / 2, sizeof(buf) - 9);
+	hid_info(hid, "uint64 %llu\n", *(u64 *)(buf + 2));
+	len = min((count - (colon - p)) / 2, sizeof(buf) - (sizeof(*tmp) + 2));
 	for (i = 0; i < len; i++) {
 		buf2[0] = colon[i * 2];
 		buf2[1] = colon[i * 2 + 1];
-		if (kstrtou8(buf2, 16, &buf[9 + i])) {
+		if (kstrtou8(buf2, 16, &buf[sizeof(*tmp) + 2 + i])) {
 			hid_err(hid, "err sync string,only hex string allowed\n");
 			ret = -EINVAL;
 			goto fail;
 		}
 	}
-
-	len = i + 9;
-	ret = hid_hw_raw_request(hid, report_number, (unsigned char *)buf, len,
-		report_type, HID_REQ_SET_REPORT);
-	if (ret != len) {
+	len = i + sizeof(*tmp) + 2;
+	ret = rkvr_send_report(dev, (unsigned char *)buf, len);
+	if (ret) {
 		hid_err(hid, "hid_report_encrypt fail\n");
 		ret = -EIO;
 		goto fail;
 	}
 	hid_info(hid, "hid_report_encrypt ok\n");
-	ret = 0;
+	ret = count;
 fail:
 	kfree(p);
 
 	return ret;
+}
+
+static int hid_get_capability(struct device *dev, struct hid_capability *caps)
+{
+	struct hid_device *hid = container_of(dev, struct hid_device, dev);
+	u8 data = 0;
+
+	caps->suspend_notify = 0;
+	if (!rkvr_recv_report(dev, RKVR_ID_CAPS, &data, 1)) {
+		hid_info(hid, "hid_get_capability %d\n", data);
+		caps->suspend_notify = data;
+		return 0;
+	}
+	return -1;
 }
 
 static void hid_report_fill_rw(unsigned char *buf, u8 reg, u8 *data, int len, int w)
@@ -725,8 +841,10 @@ static ssize_t rkvr_dev_attr_sync_store(struct device *dev, struct device_attrib
 			const char *buf, size_t count)
 {
 	struct hidraw *devraw = dev_get_drvdata(dev);
+	int ret;
 
-	return hid_report_sync(&devraw->hid->dev, buf, count);
+	ret = hid_report_sync(&devraw->hid->dev, buf, count - 1);
+	return ret > 0 ? count : ret;
 }
 
 static DEVICE_ATTR(sync, S_IWUSR, NULL, rkvr_dev_attr_sync_store);
@@ -888,8 +1006,6 @@ static int rkvr_connect(struct hid_device *hid)
 		hid_err(hid, "rkvr_connect:hid_hw_open fail\n");
 		goto out;
 	}
-	if (strlen(sync_string))
-		hid_report_sync(&hid->dev, sync_string, strlen(sync_string));
 
 	init_waitqueue_head(&dev->wait);
 	spin_lock_init(&dev->list_lock);
@@ -899,6 +1015,9 @@ static int rkvr_connect(struct hid_device *hid)
 	dev->minor = minor;
 	dev->exist = 1;
 	hid->hidraw = dev; /*struct hidraw * **/
+
+	hid_get_capability(&hid->dev, &rkvr_hid_capability[minor]);
+
 	mutex_unlock(&minors_lock);
 out:
 	return result;
@@ -918,7 +1037,13 @@ static unsigned int key_codes[] = {
 	KEY_POWER,
 	KEY_VOLUMEUP,
 	KEY_VOLUMEDOWN,
-	KEY_WAKEUP
+	KEY_WAKEUP,
+	KEY_ESC,
+	KEY_LEFT,
+	KEY_RIGHT,
+	KEY_UP,
+	KEY_DOWN,
+	KEY_ENTER
 };
 
 static int __must_check rkvr_keys_probe(struct hid_device *hdev)
@@ -945,6 +1070,14 @@ static int __must_check rkvr_keys_probe(struct hid_device *hdev)
 		hid_info(hdev, "input_set_capability %d\n", key_codes[i]);
 		input_set_capability(input, EV_KEY, key_codes[i]);
 	}
+
+#ifdef RK_HID_GEAR_TOUCH
+	set_bit(EV_REL, input->evbit);
+	input_set_capability(input, EV_REL, REL_X);
+	input_set_capability(input, EV_REL, REL_Y);
+	input_set_capability(input, EV_MSC, MSC_SCAN);
+	input_set_capability(input, EV_KEY, 0x110);
+#endif
 
 	error = input_register_device(input);
 	if (error) {
@@ -1139,6 +1272,55 @@ int rkvr_sensor_register_callback(int (*callback)(char *, size_t, void *), void 
 }
 EXPORT_SYMBOL_GPL(rkvr_sensor_register_callback);
 
+static int rkvr_fb_event_notify(struct notifier_block *self,
+					   unsigned long action, void *data)
+{
+	int i;
+	unsigned char buf[3] = {HID_REPORT_ID_RKVR, RKVR_ID_IDLE, 0};
+	struct hid_device *hid;
+	struct fb_event *event = data;
+	int blank_mode;
+
+	if (action != FB_EARLY_EVENT_BLANK && action != FB_EVENT_BLANK)
+		return NOTIFY_OK;
+
+	blank_mode = *((int *)event->data);
+
+	mutex_lock(&minors_lock);
+	for (i = 0; i < RKVR_HIDRAW_MAX_DEVICES; i++) {
+		if (!rkvr_hidraw_table[i] || !rkvr_hidraw_table[i]->exist)
+			continue;
+		if (!rkvr_hid_capability[i].suspend_notify) {
+			continue;
+		}
+		hid = rkvr_hidraw_table[i]->hid;
+		if (action == FB_EARLY_EVENT_BLANK) {
+			switch (blank_mode) {
+			case FB_BLANK_UNBLANK:
+				break;
+			default:
+				rkvr_send_report(&hid->dev, buf, 3);
+				break;
+			}
+		} else if (action == FB_EVENT_BLANK) {
+			switch (blank_mode) {
+			case FB_BLANK_UNBLANK:
+				buf[2] = 1;
+				rkvr_send_report(&hid->dev, buf, 3);
+				break;
+			default:
+				break;
+			}
+		}
+	}
+	mutex_unlock(&minors_lock);
+	return NOTIFY_OK;
+}
+
+static struct notifier_block rkvr_fb_notifier = {
+	.notifier_call = rkvr_fb_event_notify,
+};
+
 static int rkvr_probe(struct hid_device *hdev, const struct hid_device_id *id)
 {
 	int retval;
@@ -1183,8 +1365,8 @@ static void rkvr_remove(struct hid_device *hdev)
 	struct usb_interface *intf = to_usb_interface(hdev->dev.parent);
 
 	if (intf->cur_altsetting->desc.bInterfaceNumber == RKVR_INTERFACE_USB_SENSOR_ID) {
-		rkvr_keys_remove(hdev);
 		rkvr_hw_stop(hdev);
+		rkvr_keys_remove(hdev);
 	} else {
 		hid_hw_stop(hdev);
 	}
@@ -1262,8 +1444,15 @@ static int __init rkvr_init(void)
 	rkvr_major = MAJOR(dev_id);
 	cdev_init(&rkvr_cdev, &rkvr_ops);
 	cdev_add(&rkvr_cdev, dev_id, RKVR_HIDRAW_MAX_DEVICES);
-	return 0;
 
+	retval = fb_register_client(&rkvr_fb_notifier);
+	if (retval) {
+		pr_warn("rkvr_init - Can't register fb notifier\n");
+		goto out_chardev;
+	}
+	return 0;
+out_chardev:
+	unregister_chrdev_region(dev_id, RKVR_HIDRAW_MAX_DEVICES);
 out_register:
 	hid_unregister_driver(&rkvr_driver);
 out_class:
@@ -1276,6 +1465,7 @@ static void __exit rkvr_exit(void)
 {
 	dev_t dev_id = MKDEV(rkvr_major, 0);
 
+	fb_unregister_client(&rkvr_fb_notifier);
 	cdev_del(&rkvr_cdev);
 
 	unregister_chrdev_region(dev_id, RKVR_HIDRAW_MAX_DEVICES);

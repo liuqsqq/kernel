@@ -1941,7 +1941,10 @@ void dwc2_hcd_qh_deactivate(struct dwc2_hsotg *hsotg, struct dwc2_qh *qh,
 	 * Note: we purposely use the frame_number from the "hsotg" structure
 	 * since we know SOF interrupt will handle future frames.
 	 */
-	if (dwc2_frame_num_le(qh->next_active_frame, hsotg->frame_number))
+	if ((hsotg->core_params->uframe_sched > 0 &&
+	     dwc2_frame_num_le(qh->sched_frame, frame_number)) ||
+	    (hsotg->core_params->uframe_sched <= 0 &&
+	     qh->sched_frame == frame_number))
 		list_move_tail(&qh->qh_list_entry,
 			       &hsotg->periodic_sched_ready);
 	else
