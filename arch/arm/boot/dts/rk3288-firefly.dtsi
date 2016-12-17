@@ -736,7 +736,7 @@
 
 &vpu_service {
 	status = "okay";
-}
+};
 
 &wdt {
 	status = "okay";

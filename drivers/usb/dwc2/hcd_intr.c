@@ -164,6 +164,7 @@ static void dwc2_sof_intr(struct dwc2_hsotg *hsotg)
 			 */
 			list_move_tail(&qh->qh_list_entry,
 				       &hsotg->periodic_sched_ready);
+		}
 	}
 	tr_type = dwc2_hcd_select_transactions(hsotg);
 	if (tr_type != DWC2_TRANSACTION_NONE)
