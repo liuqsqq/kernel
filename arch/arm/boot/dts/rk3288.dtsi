@@ -1282,9 +1282,10 @@
 		resets = <&cru SRST_VCODEC_AXI>, <&cru SRST_VCODEC_AHB>;
 		reset-names = "video_a", "video_h";
 		iommus = <&vpu_mmu>;
-		iommu_enabled = <1>;
-		dev_mode = <0>;
+		iommu_enabled = <1>; 
+		dev_mode = <0>; 
 		status = "disabled";
+		/* 0 means ion, 1 means drm */
 		allocator = <1>;
 	};
 
@@ -1325,6 +1326,7 @@
 		iommus = <&hevc_mmu>;
 		iommu_enabled = <1>;
 		status = "disabled";
+		/* 0 means ion, 1 mens drm */
 		allocator = <1>;
 	};
 
