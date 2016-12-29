@@ -248,6 +248,7 @@
 		vin-supply = <&vcc_io>;
 	};
 
+	/*  disable onboard bluetooth
 	wireless-bluetooth {
 		compatible = "bluetooth-platdata";
 		uart_rts_gpios = <&gpio4 19 GPIO_ACTIVE_LOW>;
@@ -258,8 +259,9 @@
 		BT,wake_gpio     = <&gpio4 26 GPIO_ACTIVE_HIGH>;
 		BT,wake_host_irq = <&gpio4 31 GPIO_ACTIVE_HIGH>;
 		status = "okay";
-	};
-/*  disable rkwifi 
+	}; */
+
+	/*  disable rkwifi driver
 	wireless-wlan {
 		compatible = "wlan-platdata";
 		rockchip,grf = <&grf>;
@@ -267,8 +269,7 @@
 		sdio_vref = <1800>;
 		WIFI,host_wake_irq = <&gpio4 30 GPIO_ACTIVE_HIGH>;
 		status = "okay";
-	};
-*/
+	}; */
 };
 
 &cpu0 {
