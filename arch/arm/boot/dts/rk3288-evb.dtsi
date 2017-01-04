@@ -226,7 +226,6 @@
 	 */
 	vcc_sd: sdmmc-regulator {
 		compatible = "regulator-fixed";
-		gpio = <&gpio7 11 GPIO_ACTIVE_LOW>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&sdmmc_pwr>;
 		regulator-name = "vcc_sd";
@@ -234,13 +233,6 @@
 		regulator-max-microvolt = <3300000>;
 		startup-delay-us = <100000>;
 		vin-supply = <&vcc_io>;
-	};
-
-	io-domains {
-		compatible = "rockchip,rk3288-io-voltage-domain";
-		rockchip,grf = <&grf>;
-		sdcard-supply = <&vccio_sd>;
-		wifi-supply = <&vcc_18>;
 	};
 
 	wireless-bluetooth {
@@ -276,12 +268,35 @@
 	status = "okay";
 };
 
+&gmac {
+	phy-supply = <&vcc_phy>;
+	phy-mode = "rgmii";
+	clock_in_out = "input";
+	snps,reset-gpio = <&gpio4 7 0>;
+	snps,reset-active-low;
+	snps,reset-delays-us = <0 10000 1000000>;
+	assigned-clocks = <&cru SCLK_MAC>;
+	assigned-clock-parents = <&ext_gmac>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&rgmii_pins>;
+	tx_delay = <0x30>;
+	rx_delay = <0x10>;
+	status = "ok";
+};
+
 &hdmi {
 	#address-cells = <1>;
 	#size-cells = <0>;
 	#sound-dai-cells = <0>;
 	ddc-i2c-bus = <&i2c5>;
 	status = "okay";
+
+	/* Don't use vopl for HDMI */
+	ports {
+		hdmi_in: port {
+			/delete-node/ endpoint@1;
+		};
+	};
 };
 
 &sdmmc {
@@ -301,6 +316,7 @@
 	status = "okay";
 	vmmc-supply = <&vcc_sd>;
 	vqmmc-supply = <&vccio_sd>;
+	supports-sd;
 };
 
 &gmac {
@@ -316,7 +332,7 @@
 	pinctrl-0 = <&rgmii_pins>;
 	tx_delay = <0x30>;
 	rx_delay = <0x10>;
-	status = "ok";
+	status = "okay";
 };
 
 &edp_phy {
@@ -328,6 +344,11 @@
 	status = "okay";
 
 	ports {
+		/* Don't use vopb for eDP */
+		edp_in: port@0 {
+			/delete-node/ endpoint@0;
+		};
+
 		edp_out: port@1 {
 			reg = <1>;
 			#address-cells = <1>;
@@ -338,6 +359,10 @@
 			};
 		};
 	};
+};
+
+&hevc_service {
+	status = "okay";
 };
 
 &i2c0 {
@@ -365,6 +390,13 @@
 &i2s {
 	#sound-dai-cells = <0>;
 	status = "okay";
+};
+
+&io_domains {
+	status = "okay";
+
+	sdcard-supply = <&vccio_sd>;
+	wifi-supply = <&vcc_18>;
 };
 
 &wdt {
@@ -417,13 +449,63 @@
 	status = "okay";
 };
 
-&vpu {
+&vpu_service {
 	status = "okay";
 };
 
 &tsadc {
 	rockchip,hw-tshut-mode = <0>; /* tshut mode 0:CRU 1:GPIO */
 	rockchip,hw-tshut-polarity = <0>; /* tshut polarity 0:LOW 1:HIGH */
+	status = "okay";
+};
+
+&usbphy {
+	status = "okay";
+};
+
+&usb_host0_ehci {
+	status = "okay";
+};
+
+&usb_host1 {
+	status = "okay";
+};
+
+&usb_otg {
+	status = "okay";
+};
+
+&lvds {
+	rockchip,data-mapping = "jeida";
+	rockchip,data-width = <24>;
+	rockchip,output = "lvds";
+	rockchip,panel = <&lvds_panel>;
+	status = "disabled";
+};
+
+&vopb {
+	status = "okay";
+
+	/* Don't use vopb for eDP, save it for HDMI */
+	vopb_out: port {
+		/delete-node/ endpoint@1;
+	};
+};
+
+&vopb_mmu {
+	status = "okay";
+};
+
+&vopl {
+	status = "okay";
+
+	/* Don't use vopb for HDMI, save it for eDP */
+	vopl_out: port {
+		/delete-node/ endpoint@0;
+	};
+};
+
+&vopl_mmu {
 	status = "okay";
 };
 
@@ -513,44 +595,4 @@
 			rockchip,pins = <4 19 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
 	};
-};
-
-&usbphy {
-	status = "okay";
-};
-
-&usb_host0_ehci {
-	status = "okay";
-};
-
-&usb_host1 {
-	status = "okay";
-};
-
-&usb_otg {
-	status = "okay";
-};
-
-&lvds {
-	rockchip,data-mapping = "jeida";
-	rockchip,data-width = <24>;
-	rockchip,output = "lvds";
-	rockchip,panel = <&lvds_panel>;
-	status = "disabled";
-};
-
-&vopb {
-	status = "okay";
-};
-
-&vopb_mmu {
-	status = "okay";
-};
-
-&vopl {
-	status = "okay";
-};
-
-&vopl_mmu {
-	status = "okay";
 };

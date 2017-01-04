@@ -19,6 +19,7 @@
 #include <drm/drm_crtc_helper.h>
 #include <drm/drm_plane_helper.h>
 
+#include <linux/iopoll.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
@@ -47,10 +48,10 @@
 #define VOP_WIN_SUPPORT(vop, win, name) \
 		VOP_REG_SUPPORT(vop, win->phy->name)
 
-#define VOP_CTRL_SUPPORT(vop, win, name) \
+#define VOP_CTRL_SUPPORT(vop, name) \
 		VOP_REG_SUPPORT(vop, vop->data->ctrl->name)
 
-#define VOP_INTR_SUPPORT(vop, win, name) \
+#define VOP_INTR_SUPPORT(vop, name) \
 		VOP_REG_SUPPORT(vop, vop->data->intr->name)
 
 #define __REG_SET(x, off, mask, shift, v, write_mask, relaxed) \
@@ -85,7 +86,10 @@
 #define VOP_INTR_GET(vop, name) \
 		vop_read_reg(vop, 0, &vop->data->ctrl->name)
 
-#define VOP_INTR_SET(vop, name, mask, v) \
+#define VOP_INTR_SET(vop, name, v) \
+		REG_SET(vop, name, 0, vop->data->intr->name, \
+			v, false)
+#define VOP_INTR_SET_MASK(vop, name, mask, v) \
 		REG_SET_MASK(vop, name, 0, vop->data->intr->name, \
 			     mask, v, false)
 
@@ -98,7 +102,7 @@
 				mask |= 1 << i; \
 			} \
 		} \
-		VOP_INTR_SET(vop, name, mask, reg); \
+		VOP_INTR_SET_MASK(vop, name, mask, reg); \
 	} while (0)
 #define VOP_INTR_GET_TYPE(vop, name, type) \
 		vop_get_intr_type(vop, &vop->data->intr->name, type)
@@ -162,6 +166,7 @@ struct vop {
 	struct drm_device *drm_dev;
 	struct drm_property *plane_zpos_prop;
 	struct drm_property *plane_feature_prop;
+	struct drm_property *feature_prop;
 	bool is_iommu_enabled;
 	bool is_iommu_needed;
 	bool is_enabled;
@@ -172,6 +177,8 @@ struct vop {
 	struct completion dsp_hold_completion;
 	struct completion wait_update_complete;
 	struct drm_pending_vblank_event *event;
+
+	struct completion line_flag_completion;
 
 	const struct vop_data *data;
 	int num_wins;
@@ -299,6 +306,16 @@ static bool vop_is_cfg_done_complete(struct vop *vop)
 	return VOP_CTRL_GET(vop, cfg_done) ? false : true;
 }
 
+static bool vop_fs_irq_is_active(struct vop *vop)
+{
+	return VOP_INTR_GET_TYPE(vop, status, FS_INTR);
+}
+
+static bool vop_line_flag_is_active(struct vop *vop)
+{
+	return VOP_INTR_GET_TYPE(vop, status, LINE_FLAG_INTR);
+}
+
 static bool has_rb_swapped(uint32_t format)
 {
 	switch (format) {
@@ -327,10 +344,13 @@ static enum vop_data_format vop_convert_format(uint32_t format)
 	case DRM_FORMAT_BGR565:
 		return VOP_FMT_RGB565;
 	case DRM_FORMAT_NV12:
+	case DRM_FORMAT_NV12_10:
 		return VOP_FMT_YUV420SP;
 	case DRM_FORMAT_NV16:
+	case DRM_FORMAT_NV16_10:
 		return VOP_FMT_YUV422SP;
 	case DRM_FORMAT_NV24:
+	case DRM_FORMAT_NV24_10:
 		return VOP_FMT_YUV444SP;
 	default:
 		DRM_ERROR("unsupport format[%08x]\n", format);
@@ -342,8 +362,23 @@ static bool is_yuv_support(uint32_t format)
 {
 	switch (format) {
 	case DRM_FORMAT_NV12:
+	case DRM_FORMAT_NV12_10:
 	case DRM_FORMAT_NV16:
+	case DRM_FORMAT_NV16_10:
 	case DRM_FORMAT_NV24:
+	case DRM_FORMAT_NV24_10:
+		return true;
+	default:
+		return false;
+	}
+}
+
+static bool is_yuv_10bit(uint32_t format)
+{
+	switch (format) {
+	case DRM_FORMAT_NV12_10:
+	case DRM_FORMAT_NV16_10:
+	case DRM_FORMAT_NV24_10:
 		return true;
 	default:
 		return false;
@@ -640,6 +675,7 @@ static void vop_dsp_hold_valid_irq_enable(struct vop *vop)
 
 	spin_lock_irqsave(&vop->irq_lock, flags);
 
+	VOP_INTR_SET_TYPE(vop, clear, DSP_HOLD_VALID_INTR, 1);
 	VOP_INTR_SET_TYPE(vop, enable, DSP_HOLD_VALID_INTR, 1);
 
 	spin_unlock_irqrestore(&vop->irq_lock, flags);
@@ -652,6 +688,72 @@ static void vop_dsp_hold_valid_irq_disable(struct vop *vop)
 	spin_lock_irqsave(&vop->irq_lock, flags);
 
 	VOP_INTR_SET_TYPE(vop, enable, DSP_HOLD_VALID_INTR, 0);
+
+	spin_unlock_irqrestore(&vop->irq_lock, flags);
+}
+
+/*
+ * (1) each frame starts at the start of the Vsync pulse which is signaled by
+ *     the "FRAME_SYNC" interrupt.
+ * (2) the active data region of each frame ends at dsp_vact_end
+ * (3) we should program this same number (dsp_vact_end) into dsp_line_frag_num,
+ *      to get "LINE_FLAG" interrupt at the end of the active on screen data.
+ *
+ * VOP_INTR_CTRL0.dsp_line_frag_num = VOP_DSP_VACT_ST_END.dsp_vact_end
+ * Interrupts
+ * LINE_FLAG -------------------------------+
+ * FRAME_SYNC ----+                         |
+ *                |                         |
+ *                v                         v
+ *                | Vsync | Vbp |  Vactive  | Vfp |
+ *                        ^     ^           ^     ^
+ *                        |     |           |     |
+ *                        |     |           |     |
+ * dsp_vs_end ------------+     |           |     |   VOP_DSP_VTOTAL_VS_END
+ * dsp_vact_start --------------+           |     |   VOP_DSP_VACT_ST_END
+ * dsp_vact_end ----------------------------+     |   VOP_DSP_VACT_ST_END
+ * dsp_total -------------------------------------+   VOP_DSP_VTOTAL_VS_END
+ */
+static bool vop_line_flag_irq_is_enabled(struct vop *vop)
+{
+	uint32_t line_flag_irq;
+	unsigned long flags;
+
+	spin_lock_irqsave(&vop->irq_lock, flags);
+
+	line_flag_irq = VOP_INTR_GET_TYPE(vop, enable, LINE_FLAG_INTR);
+
+	spin_unlock_irqrestore(&vop->irq_lock, flags);
+
+	return !!line_flag_irq;
+}
+
+static void vop_line_flag_irq_enable(struct vop *vop, int line_num)
+{
+	unsigned long flags;
+
+	if (WARN_ON(!vop->is_enabled))
+		return;
+
+	spin_lock_irqsave(&vop->irq_lock, flags);
+
+	VOP_INTR_SET(vop, line_flag_num[0], line_num);
+	VOP_INTR_SET_TYPE(vop, clear, LINE_FLAG_INTR, 1);
+	VOP_INTR_SET_TYPE(vop, enable, LINE_FLAG_INTR, 1);
+
+	spin_unlock_irqrestore(&vop->irq_lock, flags);
+}
+
+static void vop_line_flag_irq_disable(struct vop *vop)
+{
+	unsigned long flags;
+
+	if (WARN_ON(!vop->is_enabled))
+		return;
+
+	spin_lock_irqsave(&vop->irq_lock, flags);
+
+	VOP_INTR_SET_TYPE(vop, enable, LINE_FLAG_INTR, 0);
 
 	spin_unlock_irqrestore(&vop->irq_lock, flags);
 }
@@ -729,9 +831,16 @@ static void vop_crtc_disable(struct drm_crtc *crtc)
 		struct vop_win *win = &vop->win[i];
 
 		spin_lock(&vop->reg_lock);
+		if (win->phy->scl && win->phy->scl->ext) {
+			VOP_SCL_SET_EXT(vop, win, yrgb_hor_scl_mode, SCALE_NONE);
+			VOP_SCL_SET_EXT(vop, win, yrgb_ver_scl_mode, SCALE_NONE);
+			VOP_SCL_SET_EXT(vop, win, cbcr_hor_scl_mode, SCALE_NONE);
+			VOP_SCL_SET_EXT(vop, win, cbcr_ver_scl_mode, SCALE_NONE);
+		}
 		VOP_WIN_SET(vop, win, enable, 0);
 		spin_unlock(&vop->reg_lock);
 	}
+	VOP_CTRL_SET(vop, afbdc_en, 0);
 	vop_cfg_done(vop);
 
 	drm_crtc_vblank_off(crtc);
@@ -861,7 +970,7 @@ static int vop_plane_atomic_check(struct drm_plane *plane,
 	if (is_yuv_support(fb->pixel_format) && ((src->x1 >> 16) % 2))
 		return -EINVAL;
 
-	offset = (src->x1 >> 16) * drm_format_plane_cpp(fb->pixel_format, 0);
+	offset = (src->x1 >> 16) * drm_format_plane_bpp(fb->pixel_format, 0) / 8;
 	if (state->rotation & BIT(DRM_REFLECT_Y))
 		offset += ((src->y2 >> 16) - 1) * fb->pitches[0];
 	else
@@ -872,9 +981,9 @@ static int vop_plane_atomic_check(struct drm_plane *plane,
 	if (is_yuv_support(fb->pixel_format)) {
 		int hsub = drm_format_horz_chroma_subsampling(fb->pixel_format);
 		int vsub = drm_format_vert_chroma_subsampling(fb->pixel_format);
-		int bpp = drm_format_plane_cpp(fb->pixel_format, 1);
+		int bpp = drm_format_plane_bpp(fb->pixel_format, 1);
 
-		offset = (src->x1 >> 16) * bpp / hsub;
+		offset = (src->x1 >> 16) * bpp / hsub / 8;
 		offset += (src->y1 >> 16) * fb->pitches[1] / vsub;
 
 		dma_addr = rockchip_fb_get_dma_addr(fb, 1);
@@ -903,6 +1012,16 @@ static void vop_plane_atomic_disable(struct drm_plane *plane,
 
 	spin_lock(&vop->reg_lock);
 
+	/*
+	 * FIXUP: some of the vop scale would be abnormal after windows power
+	 * on/off so deinit scale to scale_none mode.
+	 */
+	if (win->phy->scl && win->phy->scl->ext) {
+		VOP_SCL_SET_EXT(vop, win, yrgb_hor_scl_mode, SCALE_NONE);
+		VOP_SCL_SET_EXT(vop, win, yrgb_ver_scl_mode, SCALE_NONE);
+		VOP_SCL_SET_EXT(vop, win, cbcr_hor_scl_mode, SCALE_NONE);
+		VOP_SCL_SET_EXT(vop, win, cbcr_ver_scl_mode, SCALE_NONE);
+	}
 	VOP_WIN_SET(vop, win, enable, 0);
 
 	spin_unlock(&vop->reg_lock);
@@ -968,6 +1087,7 @@ static void vop_plane_atomic_update(struct drm_plane *plane,
 		VOP_WIN_SET(vop, win, uv_vir, fb->pitches[1] >> 2);
 		VOP_WIN_SET(vop, win, uv_mst, vop_plane_state->uv_mst);
 	}
+	VOP_WIN_SET(vop, win, fmt_10, is_yuv_10bit(fb->pixel_format));
 
 	scl_vop_cal_scl_fac(vop, win, actual_w, actual_h,
 			    drm_rect_width(dest), drm_rect_height(dest),
@@ -1133,6 +1253,7 @@ static int vop_crtc_enable_vblank(struct drm_crtc *crtc)
 
 	spin_lock_irqsave(&vop->irq_lock, flags);
 
+	VOP_INTR_SET_TYPE(vop, clear, FS_INTR, 1);
 	VOP_INTR_SET_TYPE(vop, enable, FS_INTR, 1);
 
 	spin_unlock_irqrestore(&vop->irq_lock, flags);
@@ -1217,14 +1338,19 @@ static void vop_crtc_enable(struct drm_crtc *crtc)
 	u16 vsync_len = adjusted_mode->crtc_vsync_end - adjusted_mode->crtc_vsync_start;
 	u16 vact_st = adjusted_mode->crtc_vtotal - adjusted_mode->crtc_vsync_start;
 	u16 vact_end = vact_st + vdisplay;
+	uint32_t version = vop->data->version;
 	uint32_t val;
 
 	vop_enable(crtc);
 	/*
 	 * If dclk rate is zero, mean that scanout is stop,
 	 * we don't need wait any more.
+	 *
+	 * Since vop version(3,4), vop timing is frame effect, not need config
+	 * timing register on vblank.
 	 */
-	if (clk_get_rate(vop->dclk)) {
+	if (clk_get_rate(vop->dclk) &&
+	    !(VOP_MAJOR(version) == 3 && VOP_MINOR(version) >= 4)) {
 		/*
 		 * Rk3288 vop timing register is immediately, when configure
 		 * display timing on display time, may cause tearing.
@@ -1286,6 +1412,23 @@ static void vop_crtc_enable(struct drm_crtc *crtc)
 		s->output_mode = ROCKCHIP_OUT_MODE_P888;
 
 	VOP_CTRL_SET(vop, out_mode, s->output_mode);
+	switch (s->bus_format) {
+	case MEDIA_BUS_FMT_RGB565_1X16:
+		val = DITHER_DOWN_EN(1) | DITHER_DOWN_MODE(RGB888_TO_RGB565) |
+			PRE_DITHER_DOWN_EN(1);
+		break;
+	case MEDIA_BUS_FMT_RGB666_1X18:
+	case MEDIA_BUS_FMT_RGB666_1X24_CPADHI:
+		val = DITHER_DOWN_EN(1) | DITHER_DOWN_MODE(RGB888_TO_RGB666) |
+			PRE_DITHER_DOWN_EN(1);
+		break;
+	case MEDIA_BUS_FMT_RGB888_1X24:
+	default:
+		val = DITHER_DOWN_EN(0) | PRE_DITHER_DOWN_EN(0);
+		break;
+	}
+	val |= DITHER_DOWN_MODE_SEL(DITHER_DOWN_ALLEGRO);
+	VOP_CTRL_SET(vop, dither_down, val);
 
 	VOP_CTRL_SET(vop, htotal_pw, (htotal << 16) | hsync_len);
 	val = hact_st << 16;
@@ -1328,6 +1471,78 @@ static int vop_zpos_cmp(const void *a, const void *b)
 	return pa->zpos - pb->zpos;
 }
 
+static int vop_afbdc_atomic_check(struct drm_crtc *crtc,
+				  struct drm_crtc_state *crtc_state)
+{
+	struct vop *vop = to_vop(crtc);
+	const struct vop_data *vop_data = vop->data;
+	struct rockchip_crtc_state *s = to_rockchip_crtc_state(crtc_state);
+	struct drm_atomic_state *state = crtc_state->state;
+	struct drm_plane *plane;
+	struct drm_plane_state *pstate;
+	struct vop_plane_state *plane_state;
+	struct vop_win *win;
+	int afbdc_format;
+	int i;
+
+	s->afbdc_en = 0;
+
+	for_each_plane_in_state(state, plane, pstate, i) {
+		struct drm_framebuffer *fb = pstate->fb;
+		struct drm_rect *src;
+
+		win = to_vop_win(plane);
+		plane_state = to_vop_plane_state(pstate);
+
+		if (pstate->crtc != crtc || !fb)
+			continue;
+
+		if (fb->modifier[0] != DRM_FORMAT_MOD_ARM_AFBC)
+			continue;
+
+		if (!(vop_data->feature & VOP_FEATURE_AFBDC)) {
+			DRM_ERROR("not support afbdc\n");
+			return -EINVAL;
+		}
+
+		switch (plane_state->format) {
+		case VOP_FMT_ARGB8888:
+			afbdc_format = AFBDC_FMT_U8U8U8U8;
+			break;
+		case VOP_FMT_RGB888:
+			afbdc_format = AFBDC_FMT_U8U8U8;
+			break;
+		case VOP_FMT_RGB565:
+			afbdc_format = AFBDC_FMT_RGB565;
+			break;
+		default:
+			return -EINVAL;
+		}
+
+		if (s->afbdc_en) {
+			DRM_ERROR("vop only support one afbc layer\n");
+			return -EINVAL;
+		}
+
+		src = &plane_state->src;
+		if (src->x1 || src->y1 || fb->offsets[0]) {
+			DRM_ERROR("win[%d] afbdc not support offset display\n",
+				  win->win_id);
+			DRM_ERROR("xpos=%d, ypos=%d, offset=%d\n",
+				  src->x1, src->y1, fb->offsets[0]);
+			return -EINVAL;
+		}
+		s->afbdc_win_format = afbdc_format;
+		s->afbdc_win_width = pstate->fb->width - 1;
+		s->afbdc_win_height = (drm_rect_height(src) >> 16) - 1;
+		s->afbdc_win_id = win->win_id;
+		s->afbdc_win_ptr = plane_state->yrgb_mst;
+		s->afbdc_en = 1;
+	}
+
+	return 0;
+}
+
 static int vop_crtc_atomic_check(struct drm_crtc *crtc,
 				 struct drm_crtc_state *crtc_state)
 {
@@ -1341,6 +1556,10 @@ static int vop_crtc_atomic_check(struct drm_crtc *crtc,
 	struct vop_zpos *pzpos;
 	int dsp_layer_sel = 0;
 	int i, j, cnt = 0, ret = 0;
+
+	ret = vop_afbdc_atomic_check(crtc, crtc_state);
+	if (ret)
+		return ret;
 
 	ret = vop_csc_atomic_check(crtc, crtc_state);
 	if (ret)
@@ -1412,8 +1631,20 @@ static void vop_cfg_update(struct drm_crtc *crtc,
 
 	spin_lock(&vop->reg_lock);
 
+	if (s->afbdc_en) {
+		uint32_t pic_size;
+
+		VOP_CTRL_SET(vop, afbdc_format, s->afbdc_win_format | 1 << 4);
+		VOP_CTRL_SET(vop, afbdc_hreg_block_split, 0);
+		VOP_CTRL_SET(vop, afbdc_sel, s->afbdc_win_id);
+		VOP_CTRL_SET(vop, afbdc_hdr_ptr, s->afbdc_win_ptr);
+		pic_size = (s->afbdc_win_width & 0xffff);
+		pic_size |= s->afbdc_win_height << 16;
+		VOP_CTRL_SET(vop, afbdc_pic_size, pic_size);
+	}
+
+	VOP_CTRL_SET(vop, afbdc_en, s->afbdc_en);
 	VOP_CTRL_SET(vop, dsp_layer_sel, s->dsp_layer_sel);
-	vop_cfg_done(vop);
 
 	spin_unlock(&vop->reg_lock);
 }
@@ -1423,20 +1654,50 @@ static void vop_crtc_atomic_flush(struct drm_crtc *crtc,
 {
 	struct vop *vop = to_vop(crtc);
 
+	vop_cfg_update(crtc, old_crtc_state);
+
 	if (!vop->is_iommu_enabled && vop->is_iommu_needed) {
+		bool need_wait_vblank = !vop_is_allwin_disabled(vop);
 		int ret;
-		if (!vop_is_allwin_disabled(vop)) {
-			vop_cfg_update(crtc, old_crtc_state);
-			while(!vop_is_cfg_done_complete(vop));
+
+		if (need_wait_vblank) {
+			bool active;
+
+			disable_irq(vop->irq);
+			drm_crtc_vblank_get(crtc);
+			VOP_INTR_SET_TYPE(vop, enable, LINE_FLAG_INTR, 1);
+
+			ret = readx_poll_timeout_atomic(vop_fs_irq_is_active,
+							vop, active, active,
+							0, 50 * 1000);
+			if (ret)
+				dev_err(vop->dev, "wait fs irq timeout\n");
+
+			VOP_INTR_SET_TYPE(vop, clear, LINE_FLAG_INTR, 1);
+			vop_cfg_done(vop);
+
+			ret = readx_poll_timeout_atomic(vop_line_flag_is_active,
+							vop, active, active,
+							0, 50 * 1000);
+			if (ret)
+				dev_err(vop->dev, "wait line flag timeout\n");
+
+			enable_irq(vop->irq);
 		}
 		ret = rockchip_drm_dma_attach_device(vop->drm_dev, vop->dev);
-		if (ret) {
-			dev_err(vop->dev, "failed to attach dma mapping, %d\n", ret);
+		if (ret)
+			dev_err(vop->dev, "failed to attach dma mapping, %d\n",
+				ret);
+
+		if (need_wait_vblank) {
+			VOP_INTR_SET_TYPE(vop, enable, LINE_FLAG_INTR, 0);
+			drm_crtc_vblank_put(crtc);
 		}
+
 		vop->is_iommu_enabled = true;
 	}
 
-	vop_cfg_update(crtc, old_crtc_state);
+	vop_cfg_done(vop);
 }
 
 static void vop_crtc_atomic_begin(struct drm_crtc *crtc,
@@ -1560,6 +1821,12 @@ static irqreturn_t vop_isr(int irq, void *data)
 		ret = IRQ_HANDLED;
 	}
 
+	if (active_irqs & LINE_FLAG_INTR) {
+		complete(&vop->line_flag_completion);
+		active_irqs &= ~LINE_FLAG_INTR;
+		ret = IRQ_HANDLED;
+	}
+
 	if (active_irqs & FS_INTR) {
 		drm_crtc_handle_vblank(crtc);
 		vop_handle_vblank(vop);
@@ -1634,6 +1901,7 @@ static int vop_create_crtc(struct vop *vop)
 	struct drm_plane *primary = NULL, *cursor = NULL, *plane, *tmp;
 	struct drm_crtc *crtc = &vop->crtc;
 	struct device_node *port;
+	uint64_t feature = 0;
 	int ret;
 	int i;
 
@@ -1694,8 +1962,14 @@ static int vop_create_crtc(struct vop *vop)
 
 	init_completion(&vop->dsp_hold_completion);
 	init_completion(&vop->wait_update_complete);
+	init_completion(&vop->line_flag_completion);
 	crtc->port = port;
 	rockchip_register_crtc_funcs(crtc, &private_crtc_funcs);
+
+	if (VOP_CTRL_SUPPORT(vop, afbdc_en))
+		feature |= BIT(ROCKCHIP_DRM_CRTC_FEATURE_AFBDC);
+	drm_object_attach_property(&crtc->base, vop->feature_prop,
+				   feature);
 
 	return 0;
 
@@ -1748,6 +2022,9 @@ static int vop_win_init(struct vop *vop)
 	static const struct drm_prop_enum_list props[] = {
 		{ ROCKCHIP_DRM_PLANE_FEATURE_SCALE, "scale" },
 		{ ROCKCHIP_DRM_PLANE_FEATURE_ALPHA, "alpha" },
+	};
+	static const struct drm_prop_enum_list crtc_props[] = {
+		{ ROCKCHIP_DRM_CRTC_FEATURE_AFBDC, "afbdc" },
 	};
 
 	for (i = 0; i < vop_data->win_size; i++) {
@@ -1805,8 +2082,60 @@ static int vop_win_init(struct vop *vop)
 		return -EINVAL;
 	}
 
+	vop->feature_prop = drm_property_create_bitmask(vop->drm_dev,
+				DRM_MODE_PROP_IMMUTABLE, "FEATURE",
+				props, ARRAY_SIZE(crtc_props),
+				BIT(ROCKCHIP_DRM_CRTC_FEATURE_AFBDC));
+	if (!vop->feature_prop) {
+		DRM_ERROR("failed to create vop feature property\n");
+		return -EINVAL;
+	}
+
 	return 0;
 }
+
+/**
+ * rockchip_drm_wait_line_flag - acqiure the give line flag event
+ * @crtc: CRTC to enable line flag
+ * @line_num: interested line number
+ * @mstimeout: millisecond for timeout
+ *
+ * Driver would hold here until the interested line flag interrupt have
+ * happened or timeout to wait.
+ *
+ * Returns:
+ * Zero on success, negative errno on failure.
+ */
+int rockchip_drm_wait_line_flag(struct drm_crtc *crtc, unsigned int line_num,
+				unsigned int mstimeout)
+{
+	struct vop *vop = to_vop(crtc);
+	unsigned long jiffies_left;
+
+	if (!crtc || !vop->is_enabled)
+		return -ENODEV;
+
+	if (line_num > crtc->mode.vtotal || mstimeout <= 0)
+		return -EINVAL;
+
+	if (vop_line_flag_irq_is_enabled(vop))
+		return -EBUSY;
+
+	reinit_completion(&vop->line_flag_completion);
+	vop_line_flag_irq_enable(vop, line_num);
+
+	jiffies_left = wait_for_completion_timeout(&vop->line_flag_completion,
+						   msecs_to_jiffies(mstimeout));
+	vop_line_flag_irq_disable(vop);
+
+	if (jiffies_left == 0) {
+		dev_err(vop->dev, "Timeout waiting for IRQ\n");
+		return -ETIMEDOUT;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(rockchip_drm_wait_line_flag);
 
 static int vop_bind(struct device *dev, struct device *master, void *data)
 {

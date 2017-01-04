@@ -111,13 +111,6 @@
 		regulator-boot-on;
 	};
 
-	io_domains: io-domains {
-		compatible = "rockchip,rk3288-io-voltage-domain";
-		rockchip,grf = <&grf>;
-
-		sdcard-supply = <&vccio_sd>;
-	};
-
 	/*
 	 * NOTE: vcc_sd isn't hooked up on v1.0 boards where power comes from
 	 * vcc_io directly.  Those boards won't be able to power cycle SD cards
@@ -167,6 +160,12 @@
 	#sound-dai-cells = <0>;
 	ddc-i2c-bus = <&i2c5>;
 	status = "okay";
+	/* Don't use vopl for HDMI */
+	ports {
+		hdmi_in: port {
+			/delete-node/ endpoint@1;
+		};
+	};
 };
 
 &i2c0 {
@@ -373,6 +372,12 @@
 	status = "okay";
 };
 
+&io_domains {
+	status = "okay";
+
+	sdcard-supply = <&vccio_sd>;
+};
+
 &pwm0 {
 	status = "okay";
 };
@@ -428,6 +433,7 @@
 };
 
 &usb_host0_ehci {
+	no-relinquish-port;
 	status = "okay";
 };
 
@@ -449,13 +455,21 @@
 
 &vopl {
 	status = "okay";
+	/* Don't use vopl for HDMI */
+	vopl_out: port {
+		/delete-node/ endpoint@0;
+	};
 };
 
 &vopl_mmu {
 	status = "okay";
 };
 
-&vpu {
+&hevc_service {
+	status = "okay";
+};
+
+&vpu_service {
 	status = "okay";
 };
 

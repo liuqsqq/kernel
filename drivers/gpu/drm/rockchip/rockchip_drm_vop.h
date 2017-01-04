@@ -23,6 +23,10 @@
 #define VOP_MAJOR(version) 	((version) >> 8)
 #define VOP_MINOR(version) 	((version) & 0xff)
 
+#define AFBDC_FMT_RGB565	0x0
+#define AFBDC_FMT_U8U8U8U8	0x5
+#define AFBDC_FMT_U8U8U8	0x4
+
 enum vop_csc_format {
 	CSC_BT601,
 	CSC_BT709,
@@ -113,13 +117,22 @@ struct vop_ctrl {
 	struct vop_reg ymirror;
 	struct vop_reg dsp_background;
 
+	/* AFBDC */
+	struct vop_reg afbdc_en;
+	struct vop_reg afbdc_sel;
+	struct vop_reg afbdc_format;
+	struct vop_reg afbdc_hreg_block_split;
+	struct vop_reg afbdc_pic_size;
+	struct vop_reg afbdc_hdr_ptr;
+	struct vop_reg afbdc_rstn;
+
 	struct vop_reg cfg_done;
 };
 
 struct vop_intr {
 	const int *intrs;
 	uint32_t nintrs;
-	struct vop_reg line_flag_num;
+	struct vop_reg line_flag_num[2];
 	struct vop_reg enable;
 	struct vop_reg clear;
 	struct vop_reg status;
@@ -199,6 +212,7 @@ struct vop_win_phy {
 	struct vop_reg gate;
 	struct vop_reg enable;
 	struct vop_reg format;
+	struct vop_reg fmt_10;
 	struct vop_reg xmirror;
 	struct vop_reg ymirror;
 	struct vop_reg rb_swap;
@@ -227,7 +241,8 @@ struct vop_win_data {
 	unsigned int area_size;
 };
 
-#define VOP_FEATURE_OUTPUT_10BIT BIT(0)
+#define VOP_FEATURE_OUTPUT_10BIT	BIT(0)
+#define VOP_FEATURE_AFBDC		BIT(1)
 
 struct vop_data {
 	const struct vop_reg_data *init_table;
@@ -363,6 +378,20 @@ enum scale_down_mode {
 	SCALE_DOWN_AVG = 0x1
 };
 
+enum dither_down_mode {
+	RGB888_TO_RGB565 = 0x0,
+	RGB888_TO_RGB666 = 0x1
+};
+
+enum dither_down_mode_sel {
+	DITHER_DOWN_ALLEGRO = 0x0,
+	DITHER_DOWN_FRC = 0x1
+};
+
+#define PRE_DITHER_DOWN_EN(x)	((x) << 0)
+#define DITHER_DOWN_EN(x)	((x) << 1)
+#define DITHER_DOWN_MODE(x)	((x) << 2)
+#define DITHER_DOWN_MODE_SEL(x)	((x) << 3)
 #define FRAC_16_16(mult, div)    (((mult) << 16) / (div))
 #define SCL_FT_DEFAULT_FIXPOINT_SHIFT	12
 #define SCL_MAX_VSKIPLINES		4

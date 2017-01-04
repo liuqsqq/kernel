@@ -63,22 +63,6 @@
 		clock-output-names = "ext_gmac";
 	};
 
-	io_domains: io-domains {
-		compatible = "rockchip,rk3288-io-voltage-domain";
-		rockchip,grf = <&grf>;
-
-		audio-supply = <&vcca_33>;
-		bb-supply = <&vcc_io>;
-		dvp-supply = <&dovdd_1v8>;
-		flash0-supply = <&vcc_flash>;
-		flash1-supply = <&vcc_lan>;
-		gpio30-supply = <&vcc_io>;
-		gpio1830-supply = <&vcc_io>;
-		lcdc-supply = <&vcc_io>;
-		sdcard-supply = <&vccio_sd>;
-		wifi-supply = <&vccio_wl>;
-	};
-
 	ir: ir-receiver {
 		compatible = "gpio-ir-receiver";
 		pinctrl-names = "default";
@@ -106,15 +90,17 @@
 		work {
 			gpios = <&gpio8 1 GPIO_ACTIVE_LOW>;
 			label = "firefly:blue:user";
-			linux,default-trigger = "rc-feedback";
+			linux,default-trigger = "rk-feedback";
+			default-state = "on";
 			pinctrl-names = "default";
 			pinctrl-0 = <&work_led>;
 		};
 
 		power {
 			gpios = <&gpio8 2 GPIO_ACTIVE_LOW>;
-			label = "firefly:green:power";
+			label = "firefly:yellow:power";
 			linux,default-trigger = "default-on";
+			default-state = "off";
 			pinctrl-names = "default";
 			pinctrl-0 = <&power_led>;
 		};
@@ -135,7 +121,7 @@
 		 */
 		reset-gpios = <&gpio4 28 GPIO_ACTIVE_LOW>;
 	};
-
+/*
 	sound {
 		compatible = "simple-audio-card";
 		simple-audio-card,name = "SPDIF";
@@ -149,6 +135,36 @@
 		compatible = "linux,spdif-dit";
 		#sound-dai-cells = <0>;
 	};
+*/
+
+	sound_i2s {
+		compatible = "simple-audio-card";
+		simple-audio-card,format = "i2s";
+		simple-audio-card,name = "rockchip,firefly-codec";
+		simple-audio-card,mclk-fs = <512>;
+
+		simple-audio-card,dai-link@0 {
+			format = "i2s";
+			cpu {
+				sound-dai = <&i2s>;
+			};
+			codec {
+				sound-dai = <&hdmi>;
+			};
+		};
+
+//		simple-audio-card,dai-link@0 {
+		simple-audio-card,dai-link@1 {
+			format = "i2s";
+			cpu {
+				sound-dai = <&i2s>;
+			};
+
+			codec {
+				sound-dai = <&es8323>;
+			};
+		};
+	};	
 
 	vbat_wl: vcc_sys: vsys-regulator {
 		compatible = "regulator-fixed";
@@ -232,6 +248,7 @@
 		vin-supply = <&vcc_io>;
 	};
 
+	/*  disable onboard bluetooth
 	wireless-bluetooth {
 		compatible = "bluetooth-platdata";
 		uart_rts_gpios = <&gpio4 19 GPIO_ACTIVE_LOW>;
@@ -242,8 +259,9 @@
 		BT,wake_gpio     = <&gpio4 26 GPIO_ACTIVE_HIGH>;
 		BT,wake_host_irq = <&gpio4 31 GPIO_ACTIVE_HIGH>;
 		status = "okay";
-	};
+	}; */
 
+	/*  disable rkwifi driver
 	wireless-wlan {
 		compatible = "wlan-platdata";
 		rockchip,grf = <&grf>;
@@ -251,7 +269,7 @@
 		sdio_vref = <1800>;
 		WIFI,host_wake_irq = <&gpio4 30 GPIO_ACTIVE_HIGH>;
 		status = "okay";
-	};
+	}; */
 };
 
 &cpu0 {
@@ -287,8 +305,21 @@
 	status = "ok";
 };
 
+&gpu  {
+	mali-supply = <&vdd_gpu>;
+	status = "okay";
+};
+
 &hdmi {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	#sound-dai-cells = <0>;
 	ddc-i2c-bus = <&i2c5>;
+	status = "okay";
+};
+
+&i2s  {
+	#sound-dai-cells = <0>;
 	status = "okay";
 };
 
@@ -441,6 +472,16 @@
 
 &i2c2 {
 	status = "okay";
+
+	es8323: es8323@10 {
+		compatible = "everest,es8323";
+		reg = <0x10>;
+		spk-con-gpio = <&gpio0 10 GPIO_ACTIVE_HIGH>;
+		hp-det-gpio = <&gpio7 15 GPIO_ACTIVE_HIGH>;
+		clock-names = "mclk";
+		clocks = <&cru SCLK_I2S0_OUT>;
+		#sound-dai-cells = <0>;
+	};
 };
 
 &i2c4 {
@@ -449,6 +490,21 @@
 
 &i2c5 {
 	status = "okay";
+};
+
+&io_domains {
+	status = "okay";
+
+	audio-supply = <&vcca_33>;
+	bb-supply = <&vcc_io>;
+	dvp-supply = <&dovdd_1v8>;
+	flash0-supply = <&vcc_flash>;
+	flash1-supply = <&vcc_lan>;
+	gpio30-supply = <&vcc_io>;
+	gpio1830-supply = <&vcc_io>;
+	lcdc-supply = <&vcc_io>;
+	sdcard-supply = <&vccio_sd>;
+	wifi-supply = <&vccio_wl>;
 };
 
 &pinctrl {
@@ -592,7 +648,7 @@
 	pinctrl-0 = <&sdio0_bus4 &sdio0_cmd &sdio0_clk &sdio0_int>;
 	sd-uhs-sdr104;
 	supports-sdio;
-	vmmc-supply = <&vbat_wl>;
+	//vmmc-supply = <&vbat_wl>;
 	vqmmc-supply = <&vccio_wl>;
 	status = "okay";
 };
@@ -676,7 +732,12 @@
 	status = "okay";
 };
 
-&vpu {
+//&vpu {
+&hevc_service {
+	status = "okay";
+};
+
+&vpu_service {
 	status = "okay";
 };
 

@@ -53,6 +53,9 @@ static const uint32_t formats_win_full[] = {
 	DRM_FORMAT_NV12,
 	DRM_FORMAT_NV16,
 	DRM_FORMAT_NV24,
+	DRM_FORMAT_NV12_10,
+	DRM_FORMAT_NV16_10,
+	DRM_FORMAT_NV24_10,
 };
 
 static const uint32_t formats_win_lite[] = {
@@ -104,6 +107,7 @@ static const struct vop_win_phy rk3288_win01_data = {
 	.nformats = ARRAY_SIZE(formats_win_full),
 	.enable = VOP_REG(RK3288_WIN0_CTRL0, 0x1, 0),
 	.format = VOP_REG(RK3288_WIN0_CTRL0, 0x7, 1),
+	.fmt_10 = VOP_REG(RK3288_WIN0_CTRL0, 0x7, 4),
 	.rb_swap = VOP_REG(RK3288_WIN0_CTRL0, 0x1, 12),
 	.xmirror = VOP_REG_VER(RK3368_WIN0_CTRL0, 0x1, 21, 3, 2, -1),
 	.ymirror = VOP_REG_VER(RK3368_WIN0_CTRL0, 0x1, 22, 3, 2, -1),
@@ -201,6 +205,14 @@ static const struct vop_ctrl rk3288_ctrl_data = {
 	.dsp_lut_en = VOP_REG(RK3288_DSP_CTRL1, 0x1, 0),
 	.out_mode = VOP_REG(RK3288_DSP_CTRL0, 0xf, 0),
 
+	.afbdc_rstn = VOP_REG(RK3399_AFBCD0_CTRL, 0x1, 3),
+	.afbdc_en = VOP_REG(RK3399_AFBCD0_CTRL, 0x1, 0),
+	.afbdc_sel = VOP_REG(RK3399_AFBCD0_CTRL, 0x3, 1),
+	.afbdc_format = VOP_REG(RK3399_AFBCD0_CTRL, 0x1f, 16),
+	.afbdc_hreg_block_split = VOP_REG(RK3399_AFBCD0_CTRL, 0x1, 21),
+	.afbdc_hdr_ptr = VOP_REG(RK3399_AFBCD0_HDR_PTR, 0xffffffff, 0),
+	.afbdc_pic_size = VOP_REG(RK3399_AFBCD0_PIC_SIZE, 0xffffffff, 0),
+
 	.xmirror = VOP_REG(RK3288_DSP_CTRL0, 0x1, 22),
 	.ymirror = VOP_REG(RK3288_DSP_CTRL0, 0x1, 23),
 
@@ -240,6 +252,7 @@ static const int rk3288_vop_intrs[] = {
 static const struct vop_intr rk3288_vop_intr = {
 	.intrs = rk3288_vop_intrs,
 	.nintrs = ARRAY_SIZE(rk3288_vop_intrs),
+	.line_flag_num[0] = VOP_REG(RK3288_INTR_CTRL0, 0x1fff, 12),
 	.status = VOP_REG(RK3288_INTR_CTRL0, 0xf, 0),
 	.enable = VOP_REG(RK3288_INTR_CTRL0, 0xf, 4),
 	.clear = VOP_REG(RK3288_INTR_CTRL0, 0xf, 8),
@@ -274,6 +287,8 @@ static const int rk3368_vop_intrs[] = {
 static const struct vop_intr rk3368_vop_intr = {
 	.intrs = rk3368_vop_intrs,
 	.nintrs = ARRAY_SIZE(rk3368_vop_intrs),
+	.line_flag_num[0] = VOP_REG(RK3368_LINE_FLAG, 0xffff, 0),
+	.line_flag_num[1] = VOP_REG(RK3368_LINE_FLAG, 0xffff, 16),
 	.status = VOP_REG_MASK(RK3368_INTR_STATUS, 0x3fff, 0),
 	.enable = VOP_REG_MASK(RK3368_INTR_EN, 0x3fff, 0),
 	.clear = VOP_REG_MASK(RK3368_INTR_CLEAR, 0x3fff, 0),
@@ -358,6 +373,8 @@ static const struct vop_data rk3368_vop = {
 static const struct vop_intr rk3366_vop_intr = {
 	.intrs = rk3368_vop_intrs,
 	.nintrs = ARRAY_SIZE(rk3368_vop_intrs),
+	.line_flag_num[0] = VOP_REG(RK3366_LINE_FLAG, 0xffff, 0),
+	.line_flag_num[1] = VOP_REG(RK3366_LINE_FLAG, 0xffff, 16),
 	.status = VOP_REG_MASK(RK3366_INTR_STATUS0, 0xffff, 0),
 	.enable = VOP_REG_MASK(RK3366_INTR_EN0, 0xffff, 0),
 	.clear = VOP_REG_MASK(RK3366_INTR_CLEAR0, 0xffff, 0),
@@ -473,7 +490,8 @@ static const struct vop_win_data rk3399_vop_win_data[] = {
 
 static const struct vop_data rk3399_vop_big = {
 	.version = VOP_VERSION(3, 5),
-	.feature = VOP_FEATURE_OUTPUT_10BIT,
+	.csc_table = &rk3399_csc_table,
+	.feature = VOP_FEATURE_OUTPUT_10BIT | VOP_FEATURE_AFBDC,
 	.intr = &rk3366_vop_intr,
 	.ctrl = &rk3288_ctrl_data,
 	.win = rk3399_vop_win_data,
@@ -567,6 +585,7 @@ static const int rk3036_vop_intrs[] = {
 static const struct vop_intr rk3036_intr = {
 	.intrs = rk3036_vop_intrs,
 	.nintrs = ARRAY_SIZE(rk3036_vop_intrs),
+	.line_flag_num[0] = VOP_REG(RK3036_INT_STATUS, 0xfff, 12),
 	.status = VOP_REG(RK3036_INT_STATUS, 0xf, 0),
 	.enable = VOP_REG(RK3036_INT_STATUS, 0xf, 4),
 	.clear = VOP_REG(RK3036_INT_STATUS, 0xf, 8),

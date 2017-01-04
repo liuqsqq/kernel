@@ -693,6 +693,8 @@ static bool rk818_bat_adc_calib(struct rk818_battery *di)
 		}
 	}
 
+	rk818_bat_set_coffset(di, save_coffset);
+
 	return false;
 }
 
@@ -1048,6 +1050,9 @@ static int rk818_bat_fb_notifier(struct notifier_block *nb,
 {
 	struct rk818_battery *di;
 	struct fb_event *evdata = data;
+
+	if (event != FB_EARLY_EVENT_BLANK && event != FB_EVENT_BLANK)
+		return NOTIFY_OK;
 
 	di = container_of(nb, struct rk818_battery, fb_nb);
 	di->fb_blank = *(int *)evdata->data;

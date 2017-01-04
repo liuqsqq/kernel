@@ -45,6 +45,7 @@
 #include <dt-bindings/sensor-dev.h>
 #include "rk3399.dtsi"
 #include "rk3399-android.dtsi"
+#include "rk3399-opp.dtsi"
 
 / {
 	model = "Rockchip RK3399 VR Board";
@@ -233,179 +234,69 @@
 		rockchip,uboot-charge-on = <0>;
 		rockchip,android-charge-on = <1>;
 	};
-};
 
-&cluster0_opp {
-	opp@408000000 {
-		opp-hz = /bits/ 64 <408000000>;
-		opp-microvolt = <800000>;
-		clock-latency-ns = <40000>;
-	};
-	opp@600000000 {
-		opp-hz = /bits/ 64 <600000000>;
-		opp-microvolt = <800000>;
-	};
-	opp@816000000 {
-		opp-hz = /bits/ 64 <816000000>;
-		opp-microvolt = <800000>;
-	};
-	opp@1008000000 {
-		opp-hz = /bits/ 64 <1008000000>;
-		opp-microvolt = <850000>;
-	};
-	opp@1200000000 {
-		opp-hz = /bits/ 64 <1200000000>;
-		opp-microvolt = <925000>;
-	};
-	opp@1416000000 {
-		opp-hz = /bits/ 64 <1416000000>;
-		opp-microvolt = <1075000>;
-	};
-	opp@1512000000 {
-		opp-hz = /bits/ 64 <1512000000>;
-		opp-microvolt = <1100000>;
-		status="disabled";
-	};
-};
+	rk_vr_key: rockchip-vr-key {
+		compatible = "rockchip,key";
+		status = "okay";
 
-&cluster1_opp {
-	opp@408000000 {
-		opp-hz = /bits/ 64 <408000000>;
-		opp-microvolt = <800000>;
-		clock-latency-ns = <40000>;
-	};
-	opp@600000000 {
-		opp-hz = /bits/ 64 <600000000>;
-		opp-microvolt = <800000>;
-	};
-	opp@816000000 {
-		opp-hz = /bits/ 64 <816000000>;
-		opp-microvolt = <825000>;
-	};
-	opp@1008000000 {
-		opp-hz = /bits/ 64 <1008000000>;
-		opp-microvolt = <850000>;
-	};
-	opp@1200000000 {
-		opp-hz = /bits/ 64 <1200000000>;
-		opp-microvolt = <900000>;
-	};
-	opp@1416000000 {
-		opp-hz = /bits/ 64 <1416000000>;
-		opp-microvolt = <1000000>;
-	};
-	opp@1608000000 {
-		opp-hz = /bits/ 64 <1608000000>;
-		opp-microvolt = <1050000>;
-	};
-	opp@1800000000 {
-		opp-hz = /bits/ 64 <1800000000>;
-		opp-microvolt = <1150000>;
-	};
-	opp@1992000000 {
-		opp-hz = /bits/ 64 <1992000000>;
-		opp-microvolt = <1225000>;
-	};
-};
+		io-channels = <&saradc 1>;
 
-&CPU_COST_A72 {
-	busy-cost-data = <
-		210   129	/*  408MHz */
-		308   184	/*  600MHz */
-		419   246	/*  816MHz */
-		518   335	/* 1008MHz */
-		617   428	/* 1200MHz */
-		728   573	/* 1416MHz */
-		827   724	/* 1608MHz */
-		925   900	/* 1800MHz */
-		1024  1108	/* 1992MHz */
-	>;
-	idle-cost-data = <
-	      15
-	      15
-	       0
-	>;
-};
+		vol-down-key {
+			linux,code = <114>;
+			label = "volume down";
+			rockchip,adc_value = <170>;
+		};
 
-&CPU_COST_A53 {
-	busy-cost-data = <
-		108    46	/*  408M */
-		159    67	/*  600M */
-		216    90	/*  816M */
-		267    120	/* 1008M */
-		318    153	/* 1200M */
-		375    198	/* 1416M */
-		401    222	/* 1512M */
-	>;
-	idle-cost-data = <
-	      6
-	      6
-	      0
-	>;
-};
+		vol-up-key {
+			linux,code = <115>;
+			label = "volume up";
+			rockchip,adc_value = <340>;
+		};
 
-&CLUSTER_COST_A72 {
-	busy-cost-data = <
-		210   129	/*  408MHz */
-		308   184	/*  600MHz */
-		419   246	/*  816MHz */
-		518   335	/* 1008MHz */
-		617   428	/* 1200MHz */
-		728   573	/* 1416MHz */
-		827   724	/* 1608MHz */
-		925   900	/* 1800MHz */
-		1024  1108	/* 1992MHz */
-	>;
-	idle-cost-data = <
-		 65
-		 65
-		 65
-	>;
-};
+		home-key {
+			linux,code = <102>;
+			label = "home";
+			rockchip,adc_value = <420>;
+		};
 
-&CLUSTER_COST_A53 {
-	busy-cost-data = <
-		108    46	/*  408M */
-		159    67	/*  600M */
-		216    90	/*  816M */
-		267    120	/* 1008M */
-		318    153	/* 1200M */
-		375    198	/* 1416M */
-		401    222	/* 1512M */
-	>;
-	idle-cost-data = <
-		56
-		56
-		56
-	>;
-};
+		camera-key {
+			linux,code = <212>;
+			label = "camera";
+			rockchip,adc_value = <520>;
+		};
 
-&gpu_opp_table {
-	compatible = "operating-points-v2";
-	opp-shared;
-	opp@200000000 {
-		opp-hz = /bits/ 64 <200000000>;
-		opp-microvolt = <825000>;
+		power-key {
+			gpios = <&gpio0 5 GPIO_ACTIVE_LOW>;
+			linux,code = <116>;
+			label = "power";
+			gpio-key,wakeup;
+		};
+
+		back-key {
+			linux,code = <158>;
+			label = "back";
+			rockchip,adc_value = <620>;
+		};
+
+		n-key {
+			linux,code = <102>;
+			label = "n";
+			rockchip,adc_value = <700>;
+		};
+
+		menu-key {
+			linux,code = <59>;
+			label = "menu";
+			rockchip,adc_value = <780>;
+		};
 	};
-	opp@300000000 {
-		opp-hz = /bits/ 64 <300000000>;
-		opp-microvolt = <850000>;
-	};
-	opp@400000000 {
-		opp-hz = /bits/ 64 <400000000>;
-		opp-microvolt = <875000>;
-	};
-	opp@500000000 {
-		opp-hz = /bits/ 64 <500000000>;
-		opp-microvolt = <950000>;
-	};
-	opp@600000000 {
-		opp-hz = /bits/ 64 <600000000>;
-		opp-microvolt = <1025000>;
-	};
-	opp@800000000 {
-		opp-hz = /bits/ 64 <800000000>;
-		opp-microvolt = <1125000>;
+
+	rk_headset {
+		compatible = "rockchip_headset";
+		headset_gpio = <&gpio4 28 GPIO_ACTIVE_LOW>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&hp_det>;
+		io-channels = <&saradc 2>;
 	};
 };
 
@@ -742,7 +633,6 @@
 		clocks = <&cru SCLK_I2S_8CH_OUT>;
 		clock-names = "mclk";
 		spk-con-gpio = <&gpio0 11 GPIO_ACTIVE_HIGH>;
-		hp-det-gpio = <&gpio4 28 GPIO_ACTIVE_LOW>;
 	};
 };
 
@@ -816,15 +706,15 @@
 };
 
 &threshold {
-	temperature = <85000>; /* millicelsius */
+	temperature = <70000>; /* millicelsius */
 };
 
 &target {
-	temperature = <100000>; /* millicelsius */
+	temperature = <85000>; /* millicelsius */
 };
 
 &soc_crit {
-	temperature = <105000>; /* millicelsius */
+	temperature = <100000>; /* millicelsius */
 };
 
 &tsadc {
@@ -836,50 +726,6 @@
 
 &saradc {
 	status = "okay";
-};
-
-&rk_key {
-	compatible = "rockchip,key";
-	status = "okay";
-	io-channels = <&saradc 1>;
-
-	vol-up-key {
-		linux,code = <115>;
-		label = "volume up";
-		rockchip,adc_value = <340>;
-	};
-
-	vol-down-key {
-		linux,code = <114>;
-		label = "volume down";
-		rockchip,adc_value = <170>;
-	};
-
-	power-key {
-		gpios = <&gpio0 5 GPIO_ACTIVE_LOW>;
-		linux,code = <116>;
-		label = "power";
-		gpio-key,wakeup;
-	};
-
-	back-key {
-		linux,code = <158>;
-		label = "back";
-		rockchip,adc_value = <620>;
-	};
-
-	n-key {
-		linux,code = <102>;
-		label = "n";
-		rockchip,adc_value = <700>;
-	};
-
-	menu-key {
-		linux,code = <59>;
-		label = "menu";
-		rockchip,adc_value = <780>;
-	};
-
 };
 
 &u2phy0 {
@@ -968,6 +814,10 @@
 &vdd_center {
 	rockchip,pwm_id= <3>;
 	rockchip,pwm_voltage = <900000>;
+};
+
+&rk_key {
+	status = "disabled";
 };
 
 &rk_screen {
@@ -1107,4 +957,18 @@
 			rockchip,pins = <1 2 RK_FUNC_GPIO &pcfg_pull_up>;
 		};
 	};
+
+	headphone {
+		hp_det: hp-det {
+			rockchip,pins = <4 28 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+	};
+};
+
+&pvtm {
+	status = "okay";
+};
+
+&pmu_pvtm {
+	status = "okay";
 };

@@ -10,11 +10,19 @@
 #define __HID_RKVR_H
 
 #define HIDRKVRHANDSHAKE(len)	_IOC(_IOC_WRITE, 'H', 0x1A, len)
+
+#define HID_REPORT_ID_RKVR	3
+#define RKVR_ID_IDLE	1
+#define RKVR_ID_SYNC	2
+#define RKVR_ID_CAPS	3
+
 #define HID_REPORT_ID_R	4
 #define HID_REPORT_ID_W	5
 #define HID_REPORT_ID_CRYP	6
+
 #define HID_REGR_REPORT	(4 - 1)
 #define HID_REGW_REPORT	(5 - 1)
+#define HID_MISC_REPORT	(6 - 1)
 
 #define HID_SYNCW_REPORT	(7 - 1)
 #define HID_SYNCR_REPORT	(8 - 1)

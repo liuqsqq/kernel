@@ -4,14 +4,16 @@
 static int rockchip_dp_removed(struct hdmi *hdmi_drv)
 {
 	struct dp_dev *dp_dev = hdmi_drv->property->priv;
+	int ret;
 
-	cdn_dp_encoder_disable(dp_dev->dp);
+	ret = cdn_dp_encoder_disable(dp_dev->dp);
+	if (ret)
+		dev_warn(hdmi_drv->dev, "dp has been removed twice:%d\n", ret);
 	return HDMI_ERROR_SUCCESS;
 }
 
 static int rockchip_dp_enable(struct hdmi *hdmi_drv)
 {
-	hdmi_submit_work(hdmi_drv, HDMI_HPD_CHANGE, 10, 0);
 	return 0;
 }
 
@@ -23,11 +25,21 @@ static int rockchip_dp_disable(struct hdmi *hdmi_drv)
 static int rockchip_dp_control_output(struct hdmi *hdmi_drv, int enable)
 {
 	struct dp_dev *dp_dev = hdmi_drv->property->priv;
+	int ret;
 
-	if (enable == HDMI_AV_UNMUTE)
-		cdn_dp_encoder_enable(dp_dev->dp);
-	else if (enable & HDMI_VIDEO_MUTE)
-		cdn_dp_encoder_disable(dp_dev->dp);
+	if (enable == HDMI_AV_UNMUTE) {
+		if (!dp_dev->early_suspended) {
+			ret = cdn_dp_encoder_enable(dp_dev->dp);
+			if (ret) {
+				dev_err(hdmi_drv->dev,
+					"dp enable video and audio output error:%d\n", ret);
+				return HDMI_ERROR_FALSE;
+			}
+		} else
+			dev_warn(hdmi_drv->dev,
+				"don't output video and audio after dp has been suspended!\n");
+	} else if (enable & HDMI_VIDEO_MUTE)
+		dev_dbg(hdmi_drv->dev, "dp disable video and audio output !\n");
 
 	return 0;
 }
@@ -44,6 +56,13 @@ static int rockchip_dp_config_video(struct hdmi *hdmi_drv,
 	struct hdmi_video_timing *timing = NULL;
 	struct dp_dev *dp_dev = hdmi_drv->property->priv;
 	struct dp_disp_info *disp_info = &dp_dev->disp_info;
+	int ret;
+
+	if (dp_dev->early_suspended) {
+		dev_warn(hdmi_drv->dev,
+			"don't config video after dp has been suspended!\n");
+		return 0;
+	}
 
 	timing = (struct hdmi_video_timing *)hdmi_vic2timing(vpara->vic);
 	if (!timing) {
@@ -57,7 +76,12 @@ static int rockchip_dp_config_video(struct hdmi *hdmi_drv,
 	disp_info->vsync_polarity = 1;
 	disp_info->hsync_polarity = 1;
 
-	cdn_dp_encoder_mode_set(dp_dev->dp, disp_info);
+	ret = cdn_dp_encoder_mode_set(dp_dev->dp, disp_info);
+	if (ret) {
+		dev_err(hdmi_drv->dev, "dp config video mode error:%d\n", ret);
+		return HDMI_ERROR_FALSE;
+	}
+
 	return 0;
 }
 
@@ -72,7 +96,7 @@ static int rockchip_dp_detect_hotplug(struct hdmi *hdmi_drv)
 
 static int rockchip_dp_read_edid(struct hdmi *hdmi_drv, int block, u8 *buf)
 {
-	int ret;
+	int ret = 0;
 	struct dp_dev *dp_dev = hdmi_drv->property->priv;
 
 	if (dp_dev->lanes == 4)
@@ -82,8 +106,9 @@ static int rockchip_dp_read_edid(struct hdmi *hdmi_drv, int block, u8 *buf)
 
 	ret = cdn_dp_get_edid(dp_dev->dp, buf, block);
 	if (ret)
-		return ret;
-	return 0;
+		dev_err(hdmi_drv->dev, "dp config video mode error:%d\n", ret);
+
+	return ret;
 }
 
 static int rockchip_dp_insert(struct hdmi *hdmi_drv)
@@ -120,17 +145,25 @@ void hpd_change(struct device *dev, int lanes)
 
 	if (lanes)
 		dp_dev->lanes = lanes;
-	if (dp_dev->hdmi->enable)
-		hdmi_submit_work(dp_dev->hdmi, HDMI_HPD_CHANGE, 20, 0);
+
+	if (dp_dev->hdmi->enable) {
+		if (dp_dev->early_suspended)
+			dev_warn(dp_dev->hdmi->dev,
+				"hpd triggered after early suspend, so don't send hpd change event !\n");
+		else
+			hdmi_submit_work(dp_dev->hdmi, HDMI_HPD_CHANGE, 10, 0);
+	}
 }
 
 static void rockchip_dp_early_suspend(struct dp_dev *dp_dev)
 {
 	hdmi_submit_work(dp_dev->hdmi, HDMI_SUSPEND_CTL, 0, 1);
+	cdn_dp_suspend(dp_dev->dp);
 }
 
 static void rockchip_dp_early_resume(struct dp_dev *dp_dev)
 {
+	cdn_dp_resume(dp_dev->dp);
 	hdmi_submit_work(dp_dev->hdmi, HDMI_RESUME_CTL, 0, 0);
 }
 
@@ -139,23 +172,26 @@ static int rockchip_dp_fb_event_notify(struct notifier_block *self,
 					   void *data)
 {
 	struct fb_event *event = data;
-	int blank_mode = *((int *)event->data);
 	struct dp_dev *dp_dev = container_of(self, struct dp_dev, fb_notif);
 
 	if (action == FB_EARLY_EVENT_BLANK) {
-		switch (blank_mode) {
+		switch (*((int *)event->data)) {
 		case FB_BLANK_UNBLANK:
 			break;
 		default:
-			if (!dp_dev->hdmi->sleep)
+			if (!dp_dev->hdmi->sleep) {
 				rockchip_dp_early_suspend(dp_dev);
+				dp_dev->early_suspended = true;
+			}
 			break;
 		}
 	} else if (action == FB_EVENT_BLANK) {
-		switch (blank_mode) {
+		switch (*((int *)event->data)) {
 		case FB_BLANK_UNBLANK:
-			if (dp_dev->hdmi->sleep)
+			if (dp_dev->hdmi->sleep) {
+				dp_dev->early_suspended = false;
 				rockchip_dp_early_resume(dp_dev);
+			}
 			break;
 		default:
 			break;
@@ -193,7 +229,10 @@ int cdn_dp_fb_register(struct platform_device *pdev, void *dp)
 	rockchip_dp_dev_init_ops(rk_dp_ops);
 	rk_cdn_dp_prop->videosrc = dp_dev->disp_info.vop_sel;
 	rk_cdn_dp_prop->display = DISPLAY_MAIN;
-	rk_cdn_dp_prop->defaultmode = HDMI_VIDEO_DEFAULT_MODE;
+	if (!of_property_read_u32(np, "dp_defaultmode", &val))
+		rk_cdn_dp_prop->defaultmode = val;
+	else
+		rk_cdn_dp_prop->defaultmode = HDMI_VIDEO_DEFAULT_MODE;
 	rk_cdn_dp_prop->name = (char *)pdev->name;
 	rk_cdn_dp_prop->priv = dp_dev;
 	rk_cdn_dp_prop->feature |=
@@ -201,17 +240,22 @@ int cdn_dp_fb_register(struct platform_device *pdev, void *dp)
 				SUPPORT_YCBCR_INPUT |
 				SUPPORT_1080I |
 				SUPPORT_480I_576I |
-				SUPPORT_4K |
-				SUPPORT_4K_4096 |
-				SUPPORT_YUV420 |
-				SUPPORT_YCBCR_INPUT |
-				SUPPORT_TMDS_600M |
 				SUPPORT_RK_DISCRETE_VR;
+
+	if (!rk_cdn_dp_prop->videosrc) {
+		rk_cdn_dp_prop->feature |=
+					SUPPORT_4K |
+					SUPPORT_4K_4096 |
+					SUPPORT_YUV420 |
+					SUPPORT_YCBCR_INPUT |
+					SUPPORT_TMDS_600M;
+	}
 
 	dp_dev->hdmi = rockchip_hdmi_register(rk_cdn_dp_prop,
 						rk_dp_ops);
 	dp_dev->hdmi->dev = dev;
 	dp_dev->hdmi->enable = 1;
+	dp_dev->early_suspended = 0;
 	dp_dev->hdmi->sleep = 0;
 	dp_dev->hdmi->colormode = HDMI_COLOR_RGB_0_255;
 	dp_dev->dp = dp;

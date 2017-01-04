@@ -30,6 +30,7 @@
 
 struct drm_device;
 struct drm_connector;
+struct iommu_domain;
 
 /*
  * Rockchip drm private crtc funcs.
@@ -63,9 +64,16 @@ struct rockchip_atomic_commit {
 
 struct rockchip_crtc_state {
 	struct drm_crtc_state base;
+	int afbdc_win_format;
+	int afbdc_win_width;
+	int afbdc_win_height;
+	int afbdc_win_ptr;
+	int afbdc_win_id;
+	int afbdc_en;
 	int dsp_layer_sel;
 	int output_type;
 	int output_mode;
+	int bus_format;
 };
 
 #define to_rockchip_crtc_state(s) \
@@ -83,6 +91,7 @@ struct rockchip_drm_file_private {
 
 struct rockchip_logo {
 	struct sg_table *sgt;
+	struct drm_mm_node mm;
 	dma_addr_t dma_addr;
 	phys_addr_t start;
 	phys_addr_t size;
@@ -110,6 +119,7 @@ struct rockchip_drm_private {
 	unsigned int cpu_fence_context;
 	atomic_t cpu_fence_seqno;
 #endif
+	struct drm_mm mm;
 };
 
 void rockchip_drm_atomic_work(struct work_struct *work);
@@ -120,6 +130,8 @@ int rockchip_drm_dma_attach_device(struct drm_device *drm_dev,
 				   struct device *dev);
 void rockchip_drm_dma_detach_device(struct drm_device *drm_dev,
 				    struct device *dev);
+int rockchip_drm_wait_line_flag(struct drm_crtc *crtc, unsigned int line_num,
+				unsigned int mstimeout);
 
 int rockchip_drm_register_subdrv(struct drm_rockchip_subdrv *subdrv);
 int rockchip_drm_unregister_subdrv(struct drm_rockchip_subdrv *subdrv);
