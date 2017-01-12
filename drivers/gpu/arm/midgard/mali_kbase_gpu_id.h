@@ -94,6 +94,11 @@
 		(((product_id) << GPU_ID2_PRODUCT_MAJOR_SHIFT) & \
 		    GPU_ID2_PRODUCT_MODEL)
 
+<<<<<<< HEAD
+=======
+#define GPU_ID2_PRODUCT_TMIX              GPU_ID2_MODEL_MAKE(6, 0)
+#define GPU_ID2_PRODUCT_THEX              GPU_ID2_MODEL_MAKE(6, 1)
+>>>>>>> upsteam/release-4.4
 
 /* Values for GPU_ID_VERSION_STATUS field for PRODUCT_ID GPU_ID_PI_T60X */
 #define GPU_ID_S_15DEV0                   0x1

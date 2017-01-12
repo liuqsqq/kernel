@@ -162,11 +162,30 @@ void kbase_event_post(struct kbase_context *ctx, struct kbase_jd_atom *atom)
 		kbase_event_process_noreport(ctx, atom);
 		return;
 	}
+<<<<<<< HEAD
 
 	mutex_lock(&ctx->event_mutex);
 	atomic_inc(&ctx->event_count);
 	list_add_tail(&atom->dep_item[0], &ctx->event_list);
 	mutex_unlock(&ctx->event_mutex);
+=======
+	kbase_tlstream_tl_attrib_atom_state(atom, TL_ATOM_STATE_POSTED);
+	if (atom->core_req & BASE_JD_REQ_EVENT_COALESCE) {
+		/* Don't report the event until other event(s) have completed */
+		mutex_lock(&ctx->event_mutex);
+		list_add_tail(&atom->dep_item[0], &ctx->event_coalesce_list);
+		++ctx->event_coalesce_count;
+		mutex_unlock(&ctx->event_mutex);
+	} else {
+		/* Report the event and any pending events now */
+		int event_count = 1;
+
+		mutex_lock(&ctx->event_mutex);
+		event_count += kbase_event_coalesce(ctx);
+		list_add_tail(&atom->dep_item[0], &ctx->event_list);
+		atomic_add(event_count, &ctx->event_count);
+		mutex_unlock(&ctx->event_mutex);
+>>>>>>> upsteam/release-4.4
 
 	kbase_event_wakeup(ctx);
 }

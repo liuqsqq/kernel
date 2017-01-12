@@ -1078,7 +1078,6 @@ static bool kbase_replay_fault_check(struct kbase_jd_atom *katom)
 bool kbase_replay_process(struct kbase_jd_atom *katom)
 {
 	struct kbase_context *kctx = katom->kctx;
-	struct kbase_jd_context *jctx = &kctx->jctx;
 	struct kbase_device *kbdev = kctx->kbdev;
 
 	/* Don't replay this atom if these issues are not present in the
@@ -1102,7 +1101,7 @@ bool kbase_replay_process(struct kbase_jd_atom *katom)
 		return false;
 	}
 
-	if (jctx->sched_info.ctx.is_dying) {
+	if (kbase_ctx_flag(kctx, KCTX_DYING)) {
 		dev_dbg(kbdev->dev, "Not replaying; context is dying\n");
 
 		if (katom->retry_count)

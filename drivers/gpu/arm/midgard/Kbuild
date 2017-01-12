@@ -15,7 +15,11 @@
 
 
 # Driver version string which is returned to userspace via an ioctl
+<<<<<<< HEAD
 MALI_RELEASE_NAME ?= "r9p0-05rel0"
+=======
+MALI_RELEASE_NAME ?= "r14p0-01rel0"
+>>>>>>> upsteam/release-4.4
 
 # Paths required for build
 KBASE_PATH = $(src)
@@ -110,7 +114,15 @@ SRC := \
 	mali_kbase_debug_job_fault.c \
 	mali_kbase_smc.c \
 	mali_kbase_mem_pool.c \
+<<<<<<< HEAD
 	mali_kbase_mem_pool_debugfs.c
+=======
+	mali_kbase_mem_pool_debugfs.c \
+	mali_kbase_tlstream.c \
+	mali_kbase_strings.c \
+	mali_kbase_as_fault_debugfs.c \
+	mali_kbase_regs_history_debugfs.c
+>>>>>>> upsteam/release-4.4
 
 ifeq ($(CONFIG_MALI_MIPE_ENABLED),y)
 	SRC += mali_kbase_tlstream.c

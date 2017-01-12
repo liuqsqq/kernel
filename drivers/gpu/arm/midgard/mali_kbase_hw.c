@@ -37,6 +37,22 @@ void kbase_hw_set_features_mask(struct kbase_device *kbdev)
 	product_id = gpu_id & GPU_ID_VERSION_PRODUCT_ID;
 	product_id >>= GPU_ID_VERSION_PRODUCT_ID_SHIFT;
 
+<<<<<<< HEAD
+=======
+	if (GPU_ID_IS_NEW_FORMAT(product_id)) {
+		switch (gpu_id & GPU_ID2_PRODUCT_MODEL) {
+		case GPU_ID2_PRODUCT_TMIX:
+			features = base_hw_features_tMIx;
+			break;
+		case GPU_ID2_PRODUCT_THEX:
+			features = base_hw_features_tHEx;
+			break;
+		default:
+			features = base_hw_features_generic;
+			break;
+		}
+	} else {
+>>>>>>> upsteam/release-4.4
 		switch (product_id) {
 		case GPU_ID_PI_TFRX:
 			/* FALLTHROUGH */
@@ -84,6 +100,31 @@ int kbase_hw_set_issues_mask(struct kbase_device *kbdev)
 	impl_tech = kbdev->gpu_props.props.thread_props.impl_tech;
 
 	if (impl_tech != IMPLEMENTATION_MODEL) {
+<<<<<<< HEAD
+=======
+		if (GPU_ID_IS_NEW_FORMAT(product_id)) {
+			switch (gpu_id) {
+			case GPU_ID2_MAKE(6, 0, 10, 0, 0, 0, 1):
+				issues = base_hw_issues_tMIx_r0p0_05dev0;
+				break;
+			case GPU_ID2_MAKE(6, 0, 10, 0, 0, 0, 2):
+				issues = base_hw_issues_tMIx_r0p0;
+				break;
+			default:
+				if ((gpu_id & GPU_ID2_PRODUCT_MODEL) ==
+							GPU_ID2_PRODUCT_TMIX) {
+					issues = base_hw_issues_tMIx_r0p0;
+				} else if ((gpu_id & GPU_ID2_PRODUCT_MODEL) ==
+							GPU_ID2_PRODUCT_THEX) {
+					issues = base_hw_issues_tHEx_r0p0;
+				} else {
+					dev_err(kbdev->dev,
+						"Unknown GPU ID %x", gpu_id);
+					return -EINVAL;
+				}
+			}
+		} else {
+>>>>>>> upsteam/release-4.4
 			switch (gpu_id) {
 			case GPU_ID_MAKE(GPU_ID_PI_T60X, 0, 0, GPU_ID_S_15DEV0):
 				issues = base_hw_issues_t60x_r0p0_15dev0;
@@ -179,6 +220,23 @@ int kbase_hw_set_issues_mask(struct kbase_device *kbdev)
 			}
 	} else {
 		/* Software model */
+<<<<<<< HEAD
+=======
+		if (GPU_ID_IS_NEW_FORMAT(product_id)) {
+			switch (gpu_id & GPU_ID2_PRODUCT_MODEL) {
+			case GPU_ID2_PRODUCT_TMIX:
+				issues = base_hw_issues_model_tMIx;
+				break;
+			case GPU_ID2_PRODUCT_THEX:
+				issues = base_hw_issues_model_tHEx;
+				break;
+			default:
+				dev_err(kbdev->dev,
+					"Unknown GPU ID %x", gpu_id);
+				return -EINVAL;
+			}
+		} else {
+>>>>>>> upsteam/release-4.4
 			switch (product_id) {
 			case GPU_ID_PI_T60X:
 				issues = base_hw_issues_model_t60x;

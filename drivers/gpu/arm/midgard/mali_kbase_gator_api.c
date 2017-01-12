@@ -40,6 +40,11 @@ const char * const *kbase_gator_hwcnt_init_names(uint32_t *total_counters)
 	uint32_t gpu_id;
 	const char * const *hardware_counters;
 	struct kbase_device *kbdev;
+<<<<<<< HEAD
+=======
+	uint32_t product_id;
+	uint32_t count;
+>>>>>>> upsteam/release-4.4
 
 	if (!total_counters)
 		return NULL;
@@ -49,6 +54,7 @@ const char * const *kbase_gator_hwcnt_init_names(uint32_t *total_counters)
 	if (!kbdev)
 		return NULL;
 
+<<<<<<< HEAD
 	gpu_id = kbdev->gpu_props.props.core_props.product_id;
 
 	switch (gpu_id) {
@@ -97,6 +103,76 @@ const char * const *kbase_gator_hwcnt_init_names(uint32_t *total_counters)
 		*total_counters = 0;
 		dev_err(kbdev->dev, "Unrecognized gpu ID: %u\n", gpu_id);
 		break;
+=======
+	product_id = kbdev->gpu_props.props.core_props.product_id;
+
+	if (GPU_ID_IS_NEW_FORMAT(product_id)) {
+		switch (GPU_ID2_MODEL_MATCH_VALUE(product_id)) {
+		case GPU_ID2_PRODUCT_TMIX:
+			hardware_counters = hardware_counters_mali_tMIx;
+			count = ARRAY_SIZE(hardware_counters_mali_tMIx);
+			break;
+		case GPU_ID2_PRODUCT_THEX:
+			hardware_counters = hardware_counters_mali_tHEx;
+			count = ARRAY_SIZE(hardware_counters_mali_tHEx);
+			break;
+		default:
+			hardware_counters = NULL;
+			count = 0;
+			dev_err(kbdev->dev, "Unrecognized product ID: %u\n",
+				product_id);
+			break;
+		}
+	} else {
+		switch (product_id) {
+			/* If we are using a Mali-T60x device */
+		case GPU_ID_PI_T60X:
+			hardware_counters = hardware_counters_mali_t60x;
+			count = ARRAY_SIZE(hardware_counters_mali_t60x);
+			break;
+			/* If we are using a Mali-T62x device */
+		case GPU_ID_PI_T62X:
+			hardware_counters = hardware_counters_mali_t62x;
+			count = ARRAY_SIZE(hardware_counters_mali_t62x);
+			break;
+			/* If we are using a Mali-T72x device */
+		case GPU_ID_PI_T72X:
+			hardware_counters = hardware_counters_mali_t72x;
+			count = ARRAY_SIZE(hardware_counters_mali_t72x);
+			break;
+			/* If we are using a Mali-T76x device */
+		case GPU_ID_PI_T76X:
+			hardware_counters = hardware_counters_mali_t76x;
+			count = ARRAY_SIZE(hardware_counters_mali_t76x);
+			break;
+			/* If we are using a Mali-T82x device */
+		case GPU_ID_PI_T82X:
+			hardware_counters = hardware_counters_mali_t82x;
+			count = ARRAY_SIZE(hardware_counters_mali_t82x);
+			break;
+			/* If we are using a Mali-T83x device */
+		case GPU_ID_PI_T83X:
+			hardware_counters = hardware_counters_mali_t83x;
+			count = ARRAY_SIZE(hardware_counters_mali_t83x);
+			break;
+			/* If we are using a Mali-T86x device */
+		case GPU_ID_PI_T86X:
+			hardware_counters = hardware_counters_mali_t86x;
+			count = ARRAY_SIZE(hardware_counters_mali_t86x);
+			break;
+			/* If we are using a Mali-T88x device */
+		case GPU_ID_PI_TFRX:
+			hardware_counters = hardware_counters_mali_t88x;
+			count = ARRAY_SIZE(hardware_counters_mali_t88x);
+			break;
+		default:
+			hardware_counters = NULL;
+			count = 0;
+			dev_err(kbdev->dev, "Unrecognized product ID: %u\n",
+				product_id);
+			break;
+		}
+>>>>>>> upsteam/release-4.4
 	}
 
 	/* Release the kbdev reference. */

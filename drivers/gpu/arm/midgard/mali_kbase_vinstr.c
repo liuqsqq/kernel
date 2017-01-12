@@ -28,6 +28,11 @@
 #include <linux/wait.h>
 
 #include <mali_kbase.h>
+<<<<<<< HEAD
+=======
+#include <mali_kbase_hwaccess_instr.h>
+#include <mali_kbase_hwaccess_jm.h>
+>>>>>>> upsteam/release-4.4
 #include <mali_kbase_hwcnt_reader.h>
 #include <mali_kbase_mem_linux.h>
 
@@ -1464,8 +1469,21 @@ static int kbasep_vinstr_hwcnt_reader_mmap(struct file *filp,
 	KBASE_DEBUG_ASSERT(cli);
 
 	size = cli->buffer_count * cli->dump_size;
+<<<<<<< HEAD
 	if (vma->vm_end - vma->vm_start > size)
 		return -ENOMEM;
+=======
+
+	if (vma->vm_pgoff > (size >> PAGE_SHIFT))
+		return -EINVAL;
+
+	offset = vma->vm_pgoff << PAGE_SHIFT;
+	if (vm_size > size - offset)
+		return -EINVAL;
+
+	addr = __pa((unsigned long)cli->dump_buffers + offset);
+	pfn = addr >> PAGE_SHIFT;
+>>>>>>> upsteam/release-4.4
 
 	return remap_pfn_range(
 			vma,
@@ -1498,6 +1516,87 @@ static int kbasep_vinstr_hwcnt_reader_release(struct inode *inode,
 
 /*****************************************************************************/
 
+<<<<<<< HEAD
+=======
+/**
+ * kbasep_vinstr_kick_scheduler - trigger scheduler cycle
+ * @kbdev: pointer to kbase device structure
+ */
+static void kbasep_vinstr_kick_scheduler(struct kbase_device *kbdev)
+{
+	struct kbasep_js_device_data *js_devdata = &kbdev->js_data;
+	unsigned long flags;
+
+	down(&js_devdata->schedule_sem);
+	spin_lock_irqsave(&kbdev->hwaccess_lock, flags);
+	kbase_backend_slot_update(kbdev);
+	spin_unlock_irqrestore(&kbdev->hwaccess_lock, flags);
+	up(&js_devdata->schedule_sem);
+}
+
+/**
+ * kbasep_vinstr_suspend_worker - worker suspending vinstr module
+ * @data: pointer to work structure
+ */
+static void kbasep_vinstr_suspend_worker(struct work_struct *data)
+{
+	struct kbase_vinstr_context *vinstr_ctx;
+	unsigned long flags;
+
+	vinstr_ctx = container_of(data, struct kbase_vinstr_context,
+			suspend_work);
+
+	mutex_lock(&vinstr_ctx->lock);
+
+	if (vinstr_ctx->kctx)
+		disable_hwcnt(vinstr_ctx);
+
+	spin_lock_irqsave(&vinstr_ctx->state_lock, flags);
+	vinstr_ctx->state = VINSTR_SUSPENDED;
+	wake_up_all(&vinstr_ctx->suspend_waitq);
+	spin_unlock_irqrestore(&vinstr_ctx->state_lock, flags);
+
+	mutex_unlock(&vinstr_ctx->lock);
+
+	/* Kick GPU scheduler to allow entering protected mode.
+	 * This must happen after vinstr was suspended. */
+	kbasep_vinstr_kick_scheduler(vinstr_ctx->kbdev);
+}
+
+/**
+ * kbasep_vinstr_suspend_worker - worker resuming vinstr module
+ * @data: pointer to work structure
+ */
+static void kbasep_vinstr_resume_worker(struct work_struct *data)
+{
+	struct kbase_vinstr_context *vinstr_ctx;
+	unsigned long flags;
+
+	vinstr_ctx = container_of(data, struct kbase_vinstr_context,
+			resume_work);
+
+	mutex_lock(&vinstr_ctx->lock);
+
+	if (vinstr_ctx->kctx)
+		enable_hwcnt(vinstr_ctx);
+
+	spin_lock_irqsave(&vinstr_ctx->state_lock, flags);
+	vinstr_ctx->state = VINSTR_IDLE;
+	wake_up_all(&vinstr_ctx->suspend_waitq);
+	spin_unlock_irqrestore(&vinstr_ctx->state_lock, flags);
+
+	mutex_unlock(&vinstr_ctx->lock);
+
+	/* Kick GPU scheduler to allow entering protected mode.
+	 * Note that scheduler state machine might requested re-entry to
+	 * protected mode before vinstr was resumed.
+	 * This must happen after vinstr was release. */
+	kbasep_vinstr_kick_scheduler(vinstr_ctx->kbdev);
+}
+
+/*****************************************************************************/
+
+>>>>>>> upsteam/release-4.4
 struct kbase_vinstr_context *kbase_vinstr_init(struct kbase_device *kbdev)
 {
 	struct kbase_vinstr_context *vinstr_ctx;

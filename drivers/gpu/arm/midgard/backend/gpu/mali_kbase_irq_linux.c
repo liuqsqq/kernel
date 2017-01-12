@@ -151,6 +151,12 @@ static irqreturn_t kbase_gpu_irq_handler(int irq, void *data)
 
 	return IRQ_HANDLED;
 }
+<<<<<<< HEAD
+=======
+
+KBASE_EXPORT_TEST_API(kbase_gpu_irq_handler);
+
+>>>>>>> upsteam/release-4.4
 static irq_handler_t kbase_handler_table[] = {
 	[JOB_IRQ_TAG] = kbase_job_irq_handler,
 	[MMU_IRQ_TAG] = kbase_mmu_irq_handler,

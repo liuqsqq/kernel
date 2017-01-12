@@ -83,6 +83,8 @@ struct vop_ctrl {
 	struct vop_reg hpost_st_end;
 	struct vop_reg vpost_st_end;
 	struct vop_reg vpost_st_end_f1;
+	struct vop_reg post_scl_factor;
+	struct vop_reg post_scl_ctrl;
 	struct vop_reg dsp_interlace;
 	struct vop_reg global_regdone_en;
 	struct vop_reg auto_gate_en;
@@ -95,11 +97,13 @@ struct vop_ctrl {
 	struct vop_reg edp_en;
 	struct vop_reg hdmi_en;
 	struct vop_reg mipi_en;
+	struct vop_reg dp_en;
 	struct vop_reg pin_pol;
 	struct vop_reg rgb_pin_pol;
 	struct vop_reg hdmi_pin_pol;
 	struct vop_reg edp_pin_pol;
 	struct vop_reg mipi_pin_pol;
+	struct vop_reg dp_pin_pol;
 
 	struct vop_reg dither_up;
 	struct vop_reg dither_down;
@@ -392,6 +396,14 @@ enum dither_down_mode_sel {
 #define DITHER_DOWN_EN(x)	((x) << 1)
 #define DITHER_DOWN_MODE(x)	((x) << 2)
 #define DITHER_DOWN_MODE_SEL(x)	((x) << 3)
+
+enum vop_pol {
+	HSYNC_POSITIVE = 0,
+	VSYNC_POSITIVE = 1,
+	DEN_NEGATIVE   = 2,
+	DCLK_INVERT    = 3
+};
+
 #define FRAC_16_16(mult, div)    (((mult) << 16) / (div))
 #define SCL_FT_DEFAULT_FIXPOINT_SHIFT	12
 #define SCL_MAX_VSKIPLINES		4

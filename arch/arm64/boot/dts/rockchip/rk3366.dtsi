@@ -48,7 +48,7 @@
 #include <dt-bindings/display/rk_fb.h>
 #include <dt-bindings/display/mipi_dsi.h>
 #include <dt-bindings/power/rk3366-power.h>
-#include <dt-bindings/soc/rockchip_boot-mode.h>
+#include <dt-bindings/soc/rockchip,boot-mode.h>
 #include <dt-bindings/thermal/thermal.h>
 
 / {
@@ -156,6 +156,20 @@
 		opp@1296000000 {
 			opp-hz = /bits/ 64 <1296000000>;
 			opp-microvolt = <1250000>;
+		};
+	};
+
+	cpu_avs: cpu-avs {
+		cluster0-avs {
+			cluster-id = <0>;
+			min-volt = <950000>; /* uV */
+			min-freq = <408000>; /* KHz */
+			leakage-adjust-volt = <
+			/*  mA        mA         uV */
+			    0         254        0
+			>;
+			nvmem-cells = <&cpu_leakage>;
+			nvmem-cell-names = "cpu_leakage";
 		};
 	};
 
@@ -717,7 +731,7 @@
 			mode-normal = <BOOT_NORMAL>;
 			mode-recovery = <BOOT_RECOVERY>;
 			mode-fastboot = <BOOT_FASTBOOT>;
-			mode-loader = <BOOT_LOADER>;
+			mode-loader = <BOOT_BL_DOWNLOAD>;
 		};
 
 		pmu_pvtm: pmu-pvtm {

@@ -206,6 +206,10 @@
 	status = "okay";
 };
 
+&hevc_service {
+	status = "okay";
+};
+
 &sdmmc {
 	supports-sd;
 	bus-width = <4>;
@@ -435,6 +439,10 @@ I2C
 	status = "okay";
 };
 
+&rga {
+	status = "okay";
+};
+
 /*
  * Debug Serial Port
  */
@@ -443,10 +451,6 @@ I2C
 };
 
 &uart3 {
-	status = "okay";
-};
-
-&vpu {
 	status = "okay";
 };
 
@@ -475,6 +479,10 @@ I2C
 };
 
 &vopl_mmu {
+	status = "okay";
+};
+
+&vpu_service {
 	status = "okay";
 };
 

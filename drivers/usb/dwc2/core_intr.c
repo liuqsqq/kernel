@@ -346,6 +346,10 @@ static void dwc2_handle_wakeup_detected_intr(struct dwc2_hsotg *hsotg)
 {
 	int ret;
 	struct device_node *np = hsotg->dev->of_node;
+
+	/* Clear interrupt */
+	dwc2_writel(GINTSTS_WKUPINT, hsotg->regs + GINTSTS);
+
 	dev_dbg(hsotg->dev, "++Resume or Remote Wakeup Detected Interrupt++\n");
 	dev_dbg(hsotg->dev, "%s lxstate = %d\n", __func__, hsotg->lx_state);
 

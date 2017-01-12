@@ -323,15 +323,38 @@ static int panel_simple_probe(struct device *dev, const struct panel_desc *desc)
 {
 	struct device_node *backlight, *ddc;
 	struct panel_simple *panel;
+	struct panel_desc *of_desc;
 	int err;
 
 	panel = devm_kzalloc(dev, sizeof(*panel), GFP_KERNEL);
 	if (!panel)
 		return -ENOMEM;
 
+	if (!desc) {
+		u32 val;
+
+		of_desc = devm_kzalloc(dev, sizeof(*of_desc), GFP_KERNEL);
+		if (!of_desc)
+			return -ENOMEM;
+		of_desc->num_modes = 0;
+		if (!of_property_read_u32(dev->of_node, "bus-format", &val))
+			of_desc->bus_format = val;
+		else
+			of_desc->bus_format = MEDIA_BUS_FMT_RGB888_1X24;
+		if (!of_property_read_u32(dev->of_node, "delay,prepare", &val))
+			of_desc->delay.prepare = val;
+		if (!of_property_read_u32(dev->of_node, "delay,enable", &val))
+			of_desc->delay.enable = val;
+		if (!of_property_read_u32(dev->of_node, "delay,disable", &val))
+			of_desc->delay.disable = val;
+		if (!of_property_read_u32(dev->of_node,
+					  "delay,unprepare", &val))
+			of_desc->delay.unprepare = val;
+	}
+
 	panel->enabled = false;
 	panel->prepared = false;
-	panel->desc = desc;
+	panel->desc = desc ? desc : of_desc;
 	panel->dev = dev;
 
 	panel->supply = devm_regulator_get(dev, "power");
@@ -553,6 +576,31 @@ static const struct panel_desc auo_b116xw03 = {
 	},
 };
 
+static const struct drm_display_mode auo_b125han03_mode = {
+	.clock = 141000,
+	.hdisplay = 1920,
+	.hsync_start = 1920 + 88,
+	.hsync_end = 1920 + 88 + 60,
+	.htotal = 1920 + 88 + 60 + 36,
+	.vdisplay = 1080,
+	.vsync_start = 1080 + 12,
+	.vsync_end = 1080 + 12 + 4,
+	.vtotal = 1080 + 12 + 4 + 20,
+	.vrefresh = 60,
+	.flags = DRM_MODE_FLAG_NVSYNC | DRM_MODE_FLAG_NHSYNC,
+};
+
+static const struct panel_desc auo_b125han03 = {
+	.modes = &auo_b125han03_mode,
+	.num_modes = 1,
+	.bpc = 6,
+	.size = {
+		.width = 276,
+		.height = 156,
+	},
+	.bus_format = MEDIA_BUS_FMT_RGB666_1X18,
+};
+
 static const struct drm_display_mode auo_b133xtn01_mode = {
 	.clock = 69500,
 	.hdisplay = 1366,
@@ -630,6 +678,34 @@ static const struct panel_desc avic_tm070ddh03 = {
 		.enable = 200,
 		.disable = 200,
 	},
+};
+
+static const struct drm_display_mode boe_nv125fhm_n73_mode = {
+	.clock = 72300,
+	.hdisplay = 1366,
+	.hsync_start = 1366 + 80,
+	.hsync_end = 1366 + 80 + 20,
+	.htotal = 1366 + 80 + 20 + 60,
+	.vdisplay = 768,
+	.vsync_start = 768 + 12,
+	.vsync_end = 768 + 12 + 2,
+	.vtotal = 768 + 12 + 2 + 8,
+	.vrefresh = 60,
+	.flags = DRM_MODE_FLAG_NVSYNC | DRM_MODE_FLAG_NHSYNC,
+};
+
+static const struct panel_desc boe_nv125fhm_n73 = {
+	.modes = &boe_nv125fhm_n73_mode,
+	.num_modes = 1,
+	.bpc = 6,
+	.size = {
+		.width = 276,
+		.height = 156,
+	},
+	.delay = {
+		.unprepare = 160,
+	},
+	.bus_format = MEDIA_BUS_FMT_RGB666_1X18,
 };
 
 static const struct drm_display_mode chunghwa_claa070wp03xg_mode = {
@@ -943,6 +1019,35 @@ static const struct panel_desc innolux_n116bge = {
 		.width = 256,
 		.height = 144,
 	},
+};
+
+static const struct drm_display_mode innolux_n125hce_mode = {
+	.clock = 138780,
+	.hdisplay = 1920,
+	.hsync_start = 1920 + 80,
+	.hsync_end = 1920 + 80 + 30,
+	.htotal = 1920 + 80 + 30 + 50,
+	.vdisplay = 1080,
+	.vsync_start = 1080 + 12,
+	.vsync_end = 1080 + 12 + 4,
+	.vtotal = 1080 + 12 + 4 + 16,
+	.vrefresh = 60,
+	.flags = DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC,
+};
+
+static const struct panel_desc innolux_n125hce = {
+	.modes = &innolux_n125hce_mode,
+	.num_modes = 1,
+	.bpc = 6,
+	.size = {
+		.width = 283,
+		.height = 168,
+	},
+	.delay = {
+		.unprepare = 600,
+		.enable = 100,
+	},
+	.bus_format = MEDIA_BUS_FMT_RGB666_1X18,
 };
 
 static const struct drm_display_mode innolux_n156bge_l21_mode = {
@@ -1276,6 +1381,9 @@ static const struct of_device_id platform_of_match[] = {
 		.compatible = "auo,b116xw03",
 		.data = &auo_b116xw03,
 	}, {
+		.compatible = "auo,b125han03",
+		.data = &auo_b125han03,
+	}, {
 		.compatible = "auo,b133htn01",
 		.data = &auo_b133htn01,
 	}, {
@@ -1284,6 +1392,9 @@ static const struct of_device_id platform_of_match[] = {
 	}, {
 		.compatible = "avic,tm070ddh03",
 		.data = &avic_tm070ddh03,
+	}, {
+		.compatible = "boe,nv125fhm-n73",
+		.data = &boe_nv125fhm_n73,
 	}, {
 		.compatible = "chunghwa,claa070wp03xg",
 		.data = &chunghwa_claa070wp03xg,
@@ -1326,6 +1437,9 @@ static const struct of_device_id platform_of_match[] = {
 	}, {
 		.compatible = "innolux,n116bge",
 		.data = &innolux_n116bge,
+	}, {
+		.compatible = "innolux,n125hce",
+		.data = &innolux_n125hce,
 	}, {
 		.compatible = "innolux,n156bge-l21",
 		.data = &innolux_n156bge_l21,

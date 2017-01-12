@@ -144,7 +144,7 @@ static void kbase_pm_invoke(struct kbase_device *kbdev,
 	u32 lo = cores & 0xFFFFFFFF;
 	u32 hi = (cores >> 32) & 0xFFFFFFFF;
 
-	lockdep_assert_held(&kbdev->pm.power_change_lock);
+	lockdep_assert_held(&kbdev->hwaccess_lock);
 
 	/*-------------------------------------------------------*/
 
@@ -417,7 +417,7 @@ static bool kbase_pm_transition_core_type(struct kbase_device *kbdev,
 	u64 powering_on_trans;
 	u64 desired_state_in_use;
 
-	lockdep_assert_held(&kbdev->pm.power_change_lock);
+	lockdep_assert_held(&kbdev->hwaccess_lock);
 
 	/* Get current state */
 	present = kbase_pm_get_present_cores(kbdev, type);
@@ -455,7 +455,7 @@ static bool kbase_pm_transition_core_type(struct kbase_device *kbdev,
 			kbdev->pm.backend.l2_powered = 0;
 	}
 
-	if (desired_state_in_use == ready && (trans == 0))
+	if (desired_state == ready && (trans == 0))
 		return true;
 
 	/* Restrict the cores to those that are actually present */
@@ -559,7 +559,7 @@ MOCKABLE(kbase_pm_check_transitions_nolock) (struct kbase_device *kbdev)
 	u64 prev_l2_available_bitmap;
 
 	KBASE_DEBUG_ASSERT(NULL != kbdev);
-	lockdep_assert_held(&kbdev->pm.power_change_lock);
+	lockdep_assert_held(&kbdev->hwaccess_lock);
 
 	spin_lock(&kbdev->pm.backend.gpu_powered_lock);
 	if (kbdev->pm.backend.gpu_powered == false) {
@@ -734,6 +734,7 @@ MOCKABLE(kbase_pm_check_transitions_nolock) (struct kbase_device *kbdev)
 				KBASE_TIMELINE_PM_EVENT_GPU_STATE_CHANGED);
 		/* Wake slow-path waiters. Job scheduler does not use this. */
 		KBASE_TRACE_ADD(kbdev, PM_WAKE_WAITERS, NULL, NULL, 0u, 0);
+
 		wake_up(&kbdev->pm.backend.gpu_in_desired_state_wait);
 	}
 
@@ -790,11 +791,13 @@ void kbase_pm_check_transitions_sync(struct kbase_device *kbdev)
 
 	/* Force the transition to be checked and reported - the cores may be
 	 * 'available' (for job submission) but not fully powered up. */
-	spin_lock_irqsave(&kbdev->pm.power_change_lock, flags);
+	spin_lock_irqsave(&kbdev->hwaccess_lock, flags);
+
 	cores_are_available = kbase_pm_check_transitions_nolock(kbdev);
+
 	/* Don't need 'cores_are_available', because we don't return anything */
 	CSTD_UNUSED(cores_are_available);
-	spin_unlock_irqrestore(&kbdev->pm.power_change_lock, flags);
+	spin_unlock_irqrestore(&kbdev->hwaccess_lock, flags);
 
 	timeout = jiffies + PM_TIMEOUT;
 
@@ -865,12 +868,12 @@ void kbase_pm_enable_interrupts(struct kbase_device *kbdev)
 	 * Clear all interrupts,
 	 * and unmask them all.
 	 */
-	spin_lock_irqsave(&kbdev->pm.power_change_lock, flags);
+	spin_lock_irqsave(&kbdev->hwaccess_lock, flags);
 	kbase_reg_write(kbdev, GPU_CONTROL_REG(GPU_IRQ_CLEAR), GPU_IRQ_REG_ALL,
 									NULL);
 	kbase_reg_write(kbdev, GPU_CONTROL_REG(GPU_IRQ_MASK), GPU_IRQ_REG_ALL,
 									NULL);
-	spin_unlock_irqrestore(&kbdev->pm.power_change_lock, flags);
+	spin_unlock_irqrestore(&kbdev->hwaccess_lock, flags);
 
 	kbase_reg_write(kbdev, JOB_CONTROL_REG(JOB_IRQ_CLEAR), 0xFFFFFFFF,
 									NULL);
@@ -882,21 +885,18 @@ void kbase_pm_enable_interrupts(struct kbase_device *kbdev)
 
 KBASE_EXPORT_TEST_API(kbase_pm_enable_interrupts);
 
-void kbase_pm_disable_interrupts(struct kbase_device *kbdev)
+void kbase_pm_disable_interrupts_nolock(struct kbase_device *kbdev)
 {
-	unsigned long flags;
-
 	KBASE_DEBUG_ASSERT(NULL != kbdev);
 	/*
 	 * Mask all interrupts,
 	 * and clear them all.
 	 */
-	spin_lock_irqsave(&kbdev->pm.power_change_lock, flags);
+	lockdep_assert_held(&kbdev->hwaccess_lock);
+
 	kbase_reg_write(kbdev, GPU_CONTROL_REG(GPU_IRQ_MASK), 0, NULL);
 	kbase_reg_write(kbdev, GPU_CONTROL_REG(GPU_IRQ_CLEAR), GPU_IRQ_REG_ALL,
 									NULL);
-	spin_unlock_irqrestore(&kbdev->pm.power_change_lock, flags);
-
 	kbase_reg_write(kbdev, JOB_CONTROL_REG(JOB_IRQ_MASK), 0, NULL);
 	kbase_reg_write(kbdev, JOB_CONTROL_REG(JOB_IRQ_CLEAR), 0xFFFFFFFF,
 									NULL);
@@ -905,7 +905,17 @@ void kbase_pm_disable_interrupts(struct kbase_device *kbdev)
 	kbase_reg_write(kbdev, MMU_REG(MMU_IRQ_CLEAR), 0xFFFFFFFF, NULL);
 }
 
+void kbase_pm_disable_interrupts(struct kbase_device *kbdev)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&kbdev->hwaccess_lock, flags);
+	kbase_pm_disable_interrupts_nolock(kbdev);
+	spin_unlock_irqrestore(&kbdev->hwaccess_lock, flags);
+}
+
 KBASE_EXPORT_TEST_API(kbase_pm_disable_interrupts);
+
 
 /*
  * pmu layout:
@@ -959,12 +969,10 @@ void kbase_pm_clock_on(struct kbase_device *kbdev, bool is_resume)
 		kbase_pm_init_hw(kbdev, PM_ENABLE_IRQS);
 	}
 
+	mutex_lock(&kbdev->mmu_hw_mutex);
 	/* Reprogram the GPU's MMU */
 	for (i = 0; i < kbdev->nr_hw_address_spaces; i++) {
-		struct kbase_as *as = &kbdev->as[i];
-
-		mutex_lock(&as->transaction_mutex);
-		spin_lock_irqsave(&js_devdata->runpool_irq.lock, flags);
+		spin_lock_irqsave(&kbdev->hwaccess_lock, flags);
 
 		if (js_devdata->runpool_irq.per_as_data[i].kctx)
 			kbase_mmu_update(
@@ -972,9 +980,9 @@ void kbase_pm_clock_on(struct kbase_device *kbdev, bool is_resume)
 		else
 			kbase_mmu_disable_as(kbdev, i);
 
-		spin_unlock_irqrestore(&js_devdata->runpool_irq.lock, flags);
-		mutex_unlock(&as->transaction_mutex);
+		spin_unlock_irqrestore(&kbdev->hwaccess_lock, flags);
 	}
+	mutex_unlock(&kbdev->mmu_hw_mutex);
 
 	/* Lastly, enable the interrupts */
 	kbase_pm_enable_interrupts(kbdev);
@@ -1200,9 +1208,25 @@ static void kbase_pm_hw_issues_apply(struct kbase_device *kbdev)
 
 }
 
+<<<<<<< HEAD
+=======
+void kbase_pm_cache_snoop_enable(struct kbase_device *kbdev)
+{
+	if ((kbdev->current_gpu_coherency_mode == COHERENCY_ACE) &&
+		!kbdev->cci_snoop_enabled) {
+#ifdef CONFIG_ARM64
+		if (kbdev->snoop_enable_smc != 0)
+			kbase_invoke_smc_fid(kbdev->snoop_enable_smc, 0, 0, 0);
+#endif /* CONFIG_ARM64 */
+		dev_dbg(kbdev->dev, "MALI - CCI Snoops - Enabled\n");
+		kbdev->cci_snoop_enabled = true;
+	}
+}
+>>>>>>> upsteam/release-4.4
 
 int kbase_pm_init_hw(struct kbase_device *kbdev, unsigned int flags)
 {
+<<<<<<< HEAD
 	unsigned long irq_flags;
 	struct kbasep_reset_timeout_data rtdata;
 
@@ -1219,6 +1243,17 @@ int kbase_pm_init_hw(struct kbase_device *kbdev, unsigned int flags)
 		kbdev->pm.backend.gpu_powered = true;
 		spin_unlock_irqrestore(&kbdev->pm.backend.gpu_powered_lock,
 								irq_flags);
+=======
+	if (kbdev->cci_snoop_enabled) {
+#ifdef CONFIG_ARM64
+		if (kbdev->snoop_disable_smc != 0) {
+			mali_cci_flush_l2(kbdev);
+			kbase_invoke_smc_fid(kbdev->snoop_disable_smc, 0, 0, 0);
+		}
+#endif /* CONFIG_ARM64 */
+		dev_dbg(kbdev->dev, "MALI - CCI Snoops Disabled\n");
+		kbdev->cci_snoop_enabled = false;
+>>>>>>> upsteam/release-4.4
 	}
 
 	/* Ensure interrupts are off to begin with, this also clears any
@@ -1317,13 +1352,71 @@ int kbase_pm_init_hw(struct kbase_device *kbdev, unsigned int flags)
 	/* The GPU still hasn't reset, give up */
 	return -EINVAL;
 
+<<<<<<< HEAD
 out:
+=======
+		spin_lock_irqsave(&kbdev->pm.backend.gpu_powered_lock,
+								irq_flags);
+		kbdev->pm.backend.gpu_powered = true;
+		spin_unlock_irqrestore(&kbdev->pm.backend.gpu_powered_lock,
+								irq_flags);
+	}
+
+	/* Ensure interrupts are off to begin with, this also clears any
+	 * outstanding interrupts */
+	kbase_pm_disable_interrupts(kbdev);
+	/* Ensure cache snoops are disabled before reset. */
+	kbase_pm_cache_snoop_disable(kbdev);
+	/* Prepare for the soft-reset */
+	kbdev->pm.backend.reset_done = false;
+
+	/* The cores should be made unavailable due to the reset */
+	spin_lock_irqsave(&kbdev->hwaccess_lock, irq_flags);
+	if (kbdev->shader_available_bitmap != 0u)
+			KBASE_TRACE_ADD(kbdev, PM_CORES_CHANGE_AVAILABLE, NULL,
+						NULL, 0u, (u32)0u);
+	if (kbdev->tiler_available_bitmap != 0u)
+			KBASE_TRACE_ADD(kbdev, PM_CORES_CHANGE_AVAILABLE_TILER,
+						NULL, NULL, 0u, (u32)0u);
+	kbdev->shader_available_bitmap = 0u;
+	kbdev->tiler_available_bitmap = 0u;
+	kbdev->l2_available_bitmap = 0u;
+	spin_unlock_irqrestore(&kbdev->hwaccess_lock, irq_flags);
+
+	/* Soft reset the GPU */
+	if (kbdev->protected_mode_support &&
+			kbdev->protected_ops->protected_mode_reset)
+		err = kbase_pm_reset_do_protected(kbdev);
+	else
+		err = kbase_pm_reset_do_normal(kbdev);
+
+	spin_lock_irqsave(&kbdev->hwaccess_lock, irq_flags);
+	if (kbdev->protected_mode)
+		resume_vinstr = true;
+	kbdev->protected_mode = false;
+	spin_unlock_irqrestore(&kbdev->hwaccess_lock, irq_flags);
+
+	if (err)
+		goto exit;
+>>>>>>> upsteam/release-4.4
 
 	if (flags & PM_HW_ISSUES_DETECT)
 		kbase_pm_hw_issues_detect(kbdev);
 
 	kbase_pm_hw_issues_apply(kbdev);
+<<<<<<< HEAD
 
+=======
+	kbase_cache_set_coherency_mode(kbdev, kbdev->system_coherency);
+
+	/* Sanity check protected mode was left after reset */
+	if (kbase_hw_has_feature(kbdev, BASE_HW_FEATURE_PROTECTED_MODE)) {
+		u32 gpu_status = kbase_reg_read(kbdev,
+				GPU_CONTROL_REG(GPU_STATUS), NULL);
+
+		WARN_ON(gpu_status & GPU_STATUS_PROTECTED_MODE_ACTIVE);
+	}
+>>>>>>> upsteam/release-4.4
 
 	/* If cycle counter was in use re-enable it, enable_irqs will only be
 	 * false when called from kbase_pm_powerup */
@@ -1344,7 +1437,10 @@ out:
 			&kbdev->pm.backend.gpu_cycle_counter_requests_lock,
 								irq_flags);
 
+		spin_lock_irqsave(&kbdev->hwaccess_lock, irq_flags);
 		kbase_pm_release_l2_caches(kbdev);
+		spin_unlock_irqrestore(&kbdev->hwaccess_lock, irq_flags);
+
 		kbase_pm_disable_interrupts(kbdev);
 	}
 
@@ -1421,11 +1517,13 @@ void kbase_pm_request_gpu_cycle_counter_l2_is_on(struct kbase_device *kbdev)
 
 KBASE_EXPORT_TEST_API(kbase_pm_request_gpu_cycle_counter_l2_is_on);
 
-void kbase_pm_release_gpu_cycle_counter(struct kbase_device *kbdev)
+void kbase_pm_release_gpu_cycle_counter_nolock(struct kbase_device *kbdev)
 {
 	unsigned long flags;
 
 	KBASE_DEBUG_ASSERT(kbdev != NULL);
+
+	lockdep_assert_held(&kbdev->hwaccess_lock);
 
 	spin_lock_irqsave(&kbdev->pm.backend.gpu_cycle_counter_requests_lock,
 									flags);
@@ -1443,6 +1541,17 @@ void kbase_pm_release_gpu_cycle_counter(struct kbase_device *kbdev)
 									flags);
 
 	kbase_pm_release_l2_caches(kbdev);
+}
+
+void kbase_pm_release_gpu_cycle_counter(struct kbase_device *kbdev)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&kbdev->hwaccess_lock, flags);
+
+	kbase_pm_release_gpu_cycle_counter_nolock(kbdev);
+
+	spin_unlock_irqrestore(&kbdev->hwaccess_lock, flags);
 }
 
 KBASE_EXPORT_TEST_API(kbase_pm_release_gpu_cycle_counter);

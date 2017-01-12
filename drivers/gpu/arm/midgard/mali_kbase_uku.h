@@ -45,9 +45,32 @@
  * 10.1:
  * - Do mmap in kernel for SAME_VA memory allocations rather then
  *   calling back into the kernel as a 2nd stage of the allocation request.
+<<<<<<< HEAD
  */
 #define BASE_UK_VERSION_MAJOR 10
 #define BASE_UK_VERSION_MINOR 1
+=======
+ *
+ * 10.2:
+ * - Add KBASE_FUNC_MEM_JIT_INIT which allows clients to request a custom VA
+ *   region for use with JIT (ignored on 32-bit platforms)
+ *
+ * 10.3:
+ * - base_jd_core_req typedef-ed to u32 (instead of to u16)
+ * - two flags added: BASE_JD_REQ_SKIP_CACHE_STAT / _END
+ *
+ * 10.4:
+ * - Removed KBASE_FUNC_EXT_BUFFER_LOCK used only in internal tests
+ *
+ * 10.5:
+ * - Reverted to performing mmap in user space so that tools like valgrind work.
+ *
+ * 10.6:
+ * - Add flags input variable to KBASE_FUNC_TLSTREAM_ACQUIRE
+ */
+#define BASE_UK_VERSION_MAJOR 10
+#define BASE_UK_VERSION_MINOR 6
+>>>>>>> upsteam/release-4.4
 
 struct kbase_uk_mem_alloc {
 	union uk_header header;
@@ -318,6 +341,7 @@ struct kbase_uk_profiling_controls {
 struct kbase_uk_debugfs_mem_profile_add {
 	union uk_header header;
 	u32 len;
+	u32 padding;
 	union kbase_pointer buf;
 };
 
@@ -332,12 +356,30 @@ struct kbase_uk_context_id {
 /**
  * struct kbase_uk_tlstream_acquire - User/Kernel space data exchange structure
  * @header: UK structure header
+ * @flags:  timeline stream flags
  * @fd:     timeline stream file descriptor
  *
- * This structure is used used when performing a call to acquire kernel side
- * timeline stream file descriptor.
+ * This structure is used when performing a call to acquire kernel side timeline
+ * stream file descriptor.
  */
 struct kbase_uk_tlstream_acquire {
+	union uk_header header;
+	/* IN */
+	u32 flags;
+	/* OUT */
+	s32  fd;
+};
+
+/**
+ * struct kbase_uk_tlstream_acquire_v10_4 - User/Kernel space data exchange
+ *                                          structure
+ * @header: UK structure header
+ * @fd:     timeline stream file descriptor
+ *
+ * This structure is used when performing a call to acquire kernel side timeline
+ * stream file descriptor.
+ */
+struct kbase_uk_tlstream_acquire_v10_4 {
 	union uk_header header;
 	/* IN */
 	/* OUT */
@@ -463,9 +505,15 @@ enum kbase_uk_function_id {
 
 	KBASE_FUNC_GET_CONTEXT_ID = (UK_FUNC_ID + 31),
 
+<<<<<<< HEAD
 #if (defined(MALI_KTLSTREAM_ENABLED) && MALI_KTLSTREAM_ENABLED) || \
 	defined(CONFIG_MALI_MIPE_ENABLED)
 	KBASE_FUNC_TLSTREAM_ACQUIRE = (UK_FUNC_ID + 32),
+=======
+#if (defined(MALI_MIPE_ENABLED) && MALI_MIPE_ENABLED) || \
+	!defined(MALI_MIPE_ENABLED)
+	KBASE_FUNC_TLSTREAM_ACQUIRE_V10_4 = (UK_FUNC_ID + 32),
+>>>>>>> upsteam/release-4.4
 #if MALI_UNIT_TEST
 	KBASE_FUNC_TLSTREAM_TEST = (UK_FUNC_ID + 33),
 	KBASE_FUNC_TLSTREAM_STATS = (UK_FUNC_ID + 34),
@@ -479,6 +527,18 @@ enum kbase_uk_function_id {
 	KBASE_FUNC_SET_PRFCNT_VALUES = (UK_FUNC_ID + 37),
 #endif
 
+<<<<<<< HEAD
+=======
+	KBASE_FUNC_SOFT_EVENT_UPDATE = (UK_FUNC_ID + 38),
+
+	KBASE_FUNC_MEM_JIT_INIT = (UK_FUNC_ID + 39),
+
+#if (defined(MALI_MIPE_ENABLED) && MALI_MIPE_ENABLED) || \
+	!defined(MALI_MIPE_ENABLED)
+	KBASE_FUNC_TLSTREAM_ACQUIRE = (UK_FUNC_ID + 40),
+#endif /* MALI_MIPE_ENABLED */
+
+>>>>>>> upsteam/release-4.4
 	KBASE_FUNC_MAX
 };
 

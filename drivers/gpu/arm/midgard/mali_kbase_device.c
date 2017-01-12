@@ -81,7 +81,6 @@ static int kbase_device_as_init(struct kbase_device *kbdev, int i)
 	if (!kbdev->as[i].pf_wq)
 		return -EINVAL;
 
-	mutex_init(&kbdev->as[i].transaction_mutex);
 	INIT_WORK(&kbdev->as[i].work_pagefault, page_fault_worker);
 	INIT_WORK(&kbdev->as[i].work_busfault, bus_fault_worker);
 
@@ -147,6 +146,31 @@ int kbase_device_init(struct kbase_device * const kbdev)
 	int i, err;
 
 	spin_lock_init(&kbdev->mmu_mask_change);
+<<<<<<< HEAD
+=======
+	mutex_init(&kbdev->mmu_hw_mutex);
+#ifdef CONFIG_ARM64
+	kbdev->cci_snoop_enabled = false;
+	np = kbdev->dev->of_node;
+	if (np != NULL) {
+		if (of_property_read_u32(np, "snoop_enable_smc",
+					&kbdev->snoop_enable_smc))
+			kbdev->snoop_enable_smc = 0;
+		if (of_property_read_u32(np, "snoop_disable_smc",
+					&kbdev->snoop_disable_smc))
+			kbdev->snoop_disable_smc = 0;
+		/* Either both or none of the calls should be provided. */
+		if (!((kbdev->snoop_disable_smc == 0
+			&& kbdev->snoop_enable_smc == 0)
+			|| (kbdev->snoop_disable_smc != 0
+			&& kbdev->snoop_enable_smc != 0))) {
+			WARN_ON(1);
+			err = -EINVAL;
+			goto fail;
+		}
+	}
+#endif /* CONFIG_ARM64 */
+>>>>>>> upsteam/release-4.4
 	/* Get the list of workarounds for issues on the current HW
 	 * (identified by the GPU_ID register)
 	 */

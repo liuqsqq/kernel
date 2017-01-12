@@ -2156,4 +2156,12 @@ static const char * const hardware_counters_mali_t88x[] = {
 	"T88x_L2_REPLAY_FULL"
 };
 
+<<<<<<< HEAD
+=======
+#include "mali_kbase_gator_hwcnt_names_tmix.h"
+
+#include "mali_kbase_gator_hwcnt_names_thex.h"
+
+
+>>>>>>> upsteam/release-4.4
 #endif
