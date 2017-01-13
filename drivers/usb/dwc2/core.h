@@ -871,7 +871,7 @@ struct dwc2_hsotg {
 	spinlock_t lock;
 	void *priv;
 	int     irq;
-	struct clk *clk;
+	struct clk *clks[DWC2_MAX_CLKS];
 	struct reset_control *reset;
 
 	unsigned int queuing_high_bandwidth:1;
