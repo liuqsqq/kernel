@@ -1,5 +1,5 @@
 #
-# (C) COPYRIGHT 2010-2015 ARM Limited. All rights reserved.
+# (C) COPYRIGHT 2010-2016 ARM Limited. All rights reserved.
 #
 # This program is free software and is provided to you under the terms of the
 # GNU General Public License version 2 as published by the Free Software
@@ -21,9 +21,6 @@ if Glob('tests/sconscript'):
 
 mock_test = 0
 
-if env['v'] != '1':
-	env['MAKECOMSTR'] = '[MAKE] ${SOURCE.dir}'
-
 # Fake platform is a transient solution for GPL drivers running in kernel that does not provide configuration via platform data.
 # For such kernels fake_platform_device should be set to 1. For kernels providing platform data fake_platform_device should be set to 0.
 if env['platform_config']=='devicetree':
@@ -32,28 +29,12 @@ else:
 	fake_platform_device = 1
 
 # Source files required for kbase.
-<<<<<<< HEAD
-kbase_src = [Glob('#kernel/drivers/gpu/arm/midgard/*.c'),
-             Glob('#kernel/drivers/gpu/arm/midgard/*.c'),
-             Glob('#kernel/drivers/gpu/arm/midgard/backend/*/*.c'),
-             Glob('#kernel/drivers/gpu/arm/midgard/backend/*/*.h'),
-             Glob('#kernel/drivers/gpu/arm/midgard/platform/%s/*.c' % (env['platform_config'])),
-             Glob('#kernel/drivers/gpu/arm/midgard/*.h'),
-             Glob('#kernel/drivers/gpu/arm/midgard/*.h'),
-             Glob('#kernel/drivers/gpu/arm/midgard/Makefile',
-             Glob('#kernel/drivers/gpu/arm/midgard/K*'))
-             ]
-
-kbase_src += [Glob('#kernel/drivers/gpu/arm/midgard/internal/*/*.c'),
-              Glob('#kernel/drivers/gpu/arm/midgard/internal/*/*/*.c')]
-=======
 kbase_src = [
 	Glob('*.c'),
 	Glob('backend/*/*.c'),
 	Glob('internal/*/*.c'),
 	Glob('platform/%s/*.c' % env['platform_config']),
 ]
->>>>>>> upsteam/release-4.4
 
 if Glob('#kernel/drivers/gpu/arm/midgard/tests/internal/src/mock') and env['unit'] == '1':
 	kbase_src += [Glob('#kernel/drivers/gpu/arm/midgard/tests/internal/src/mock/*.c')]
@@ -99,14 +80,6 @@ if env['os'] != 'android':
 if int(env['ump']) == 1:
 	env.Depends(kbase, '$STATIC_LIB_PATH/ump.ko')
 
-<<<<<<< HEAD
-if Glob('internal/sconsfrag'):
-	execfile('internal/sconsfrag')
-	get_internal(env)
-
-env.ProgTarget('kbase', cmd)
-=======
 env.KernelObjTarget('kbase', kbase)
->>>>>>> upsteam/release-4.4
 
 env.AppendUnique(BASE=['cutils_linked_list'])

@@ -1,6 +1,6 @@
 /*
  *
- * (C) COPYRIGHT 2010-2015 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2010-2016 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -32,41 +32,8 @@
 #include <backend/gpu/mali_kbase_js_internal.h>
 #include <backend/gpu/mali_kbase_pm_internal.h>
 
-<<<<<<< HEAD
-=======
-static int rk_slowdown_clk_gpu_before_poweroff_cores(struct kbase_device *kbdev)
-{
-	int ret = 0;
-	const unsigned long freq = 200 * 1000 * 1000;
-
-	mutex_lock(&kbdev->mutex_for_clk);
-	ret = clk_set_rate(kbdev->clock, freq);
-	if (ret)
-		E("Failed to set clock to %lu.", freq);
-	kbdev->is_power_off = true;
-	mutex_unlock(&kbdev->mutex_for_clk);
-
-	return ret;
-}
-
-static int rk_restore_clk_gpu(struct kbase_device *kbdev)
-{
-	int ret = 0;
-
-	mutex_lock(&kbdev->mutex_for_clk);
-	if (kbdev->freq != 0)
-		ret = clk_set_rate(kbdev->clock, kbdev->freq);
-	if (ret)
-		E("Failed to set clock to %lu.", kbdev->freq);
-	kbdev->is_power_off = false;
-	mutex_unlock(&kbdev->mutex_for_clk);
-
-	return ret;
-}
-
 static void kbase_pm_gpu_poweroff_wait_wq(struct work_struct *data);
 
->>>>>>> upsteam/release-4.4
 void kbase_pm_register_access_enable(struct kbase_device *kbdev)
 {
 	struct kbase_pm_callback_conf *callbacks;
@@ -210,29 +177,8 @@ static void kbase_pm_gpu_poweroff_wait_wq(struct work_struct *data)
 	struct kbasep_js_device_data *js_devdata = &kbdev->js_data;
 	unsigned long flags;
 
-	lockdep_assert_held(&kbdev->pm.lock);
-
-<<<<<<< HEAD
-	spin_lock_irqsave(&kbdev->pm.power_change_lock, flags);
-
-	/* Force all cores off */
-	kbdev->pm.backend.desired_shader_state = 0;
-
-	/* Force all cores to be unavailable, in the situation where
-	 * transitions are in progress for some cores but not others,
-	 * and kbase_pm_check_transitions_nolock can not immediately
-	 * power off the cores */
-	kbdev->shader_available_bitmap = 0;
-	kbdev->tiler_available_bitmap = 0;
-	kbdev->l2_available_bitmap = 0;
-
-=======
-	D("to slowdown clk_gpu before poweroff pm_cores.");
-	rk_slowdown_clk_gpu_before_poweroff_cores(kbdev);
-
 	/* Wait for power transitions to complete. We do this with no locks held
 	 * so that we don't deadlock with any pending workqueues */
->>>>>>> upsteam/release-4.4
 	KBASE_TIMELINE_PM_CHECKTRANS(kbdev,
 				SW_FLOW_PM_CHECKTRANS_PM_DO_POWEROFF_START);
 	kbase_pm_check_transitions_sync(kbdev);

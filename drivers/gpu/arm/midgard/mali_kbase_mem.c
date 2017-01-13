@@ -1,6 +1,6 @@
 /*
  *
- * (C) COPYRIGHT 2010-2015 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2010-2016 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -24,22 +24,21 @@
 #ifdef CONFIG_DMA_SHARED_BUFFER
 #include <linux/dma-buf.h>
 #endif				/* CONFIG_DMA_SHARED_BUFFER */
-
+#ifdef CONFIG_UMP
+#include <linux/ump.h>
+#endif				/* CONFIG_UMP */
 #include <linux/kernel.h>
 #include <linux/bug.h>
 #include <linux/compat.h>
+#include <linux/version.h>
 
 #include <mali_kbase_config.h>
 #include <mali_kbase.h>
 #include <mali_midg_regmap.h>
 #include <mali_kbase_cache_policy.h>
 #include <mali_kbase_hw.h>
-#include <mali_kbase_gator.h>
 #include <mali_kbase_hwaccess_time.h>
-
-#if defined(CONFIG_MALI_MIPE_ENABLED)
 #include <mali_kbase_tlstream.h>
-#endif
 
 /**
  * @brief Check the zone compatibility of two regions.
@@ -392,13 +391,33 @@ int kbase_add_va_region(struct kbase_context *kctx,
 	{
 		u64 start_pfn;
 
-		tmp = kbase_region_tracker_find_region_meeting_reqs(kctx, reg, nr_pages, align);
-		if (!tmp) {
+		/*
+		 * Depending on the zone the allocation request is for
+		 * we might need to retry it.
+		 */
+		do {
+			tmp = kbase_region_tracker_find_region_meeting_reqs(
+					kctx, reg, nr_pages, align);
+			if (tmp) {
+				start_pfn = (tmp->start_pfn + align - 1) &
+						~(align - 1);
+				err = kbase_insert_va_region_nolock(kctx, reg,
+						tmp, start_pfn, nr_pages);
+				break;
+			}
+
+			/*
+			 * If the allocation is not from the same zone as JIT
+			 * then don't retry, we're out of VA and there is
+			 * nothing which can be done about it.
+			 */
+			if ((reg->flags & KBASE_REG_ZONE_MASK) !=
+					KBASE_REG_ZONE_CUSTOM_VA)
+				break;
+		} while (kbase_jit_evict(kctx));
+
+		if (!tmp)
 			err = -ENOMEM;
-			goto exit;
-		}
-		start_pfn = (tmp->start_pfn + align - 1) & ~(align - 1);
-		err = kbase_insert_va_region_nolock(kctx, reg, tmp, start_pfn, nr_pages);
 	}
 
  exit:
@@ -410,7 +429,10 @@ KBASE_EXPORT_TEST_API(kbase_add_va_region);
 /**
  * @brief Initialize the internal region tracker data structure.
  */
-static void kbase_region_tracker_ds_init(struct kbase_context *kctx, struct kbase_va_region *same_va_reg, struct kbase_va_region *exec_reg, struct kbase_va_region *custom_va_reg)
+static void kbase_region_tracker_ds_init(struct kbase_context *kctx,
+		struct kbase_va_region *same_va_reg,
+		struct kbase_va_region *exec_reg,
+		struct kbase_va_region *custom_va_reg)
 {
 	kctx->reg_rbtree = RB_ROOT;
 	kbase_region_tracker_insert(kctx, same_va_reg);
@@ -448,6 +470,11 @@ int kbase_region_tracker_init(struct kbase_context *kctx)
 	size_t same_va_bits = sizeof(void *) * BITS_PER_BYTE;
 	u64 custom_va_size = KBASE_REG_ZONE_CUSTOM_VA_SIZE;
 	u64 gpu_va_limit = (1ULL << kctx->kbdev->gpu_props.mmu.va_bits) >> PAGE_SHIFT;
+	u64 same_va_pages;
+	int err;
+
+	/* Take the lock as kbase_free_alloced_region requires it */
+	kbase_gpu_vm_lock(kctx);
 
 #if defined(CONFIG_ARM64)
 	same_va_bits = VA_BITS;
@@ -464,29 +491,29 @@ int kbase_region_tracker_init(struct kbase_context *kctx)
 		same_va_bits = 33;
 #endif
 
-	if (kctx->kbdev->gpu_props.mmu.va_bits < same_va_bits)
-		return -EINVAL;
+	if (kctx->kbdev->gpu_props.mmu.va_bits < same_va_bits) {
+		err = -EINVAL;
+		goto fail_unlock;
+	}
 
+	same_va_pages = (1ULL << (same_va_bits - PAGE_SHIFT)) - 1;
 	/* all have SAME_VA */
 	same_va_reg = kbase_alloc_free_region(kctx, 1,
-			(1ULL << (same_va_bits - PAGE_SHIFT)) - 1,
+			same_va_pages,
 			KBASE_REG_ZONE_SAME_VA);
 
-	if (!same_va_reg)
-		return -ENOMEM;
+	if (!same_va_reg) {
+		err = -ENOMEM;
+		goto fail_unlock;
+	}
 
 #ifdef CONFIG_64BIT
-<<<<<<< HEAD
-	/* only 32-bit clients have the other two zones */
-	if (kctx->is_compat) {
-=======
 	/* 32-bit clients have exec and custom VA zones */
 	if (kbase_ctx_flag(kctx, KCTX_COMPAT)) {
->>>>>>> upsteam/release-4.4
 #endif
 		if (gpu_va_limit <= KBASE_REG_ZONE_CUSTOM_VA_BASE) {
-			kbase_free_alloced_region(same_va_reg);
-			return -EINVAL;
+			err = -EINVAL;
+			goto fail_free_same_va;
 		}
 		/* If the current size of TMEM is out of range of the
 		 * virtual address space addressable by the MMU then
@@ -501,8 +528,8 @@ int kbase_region_tracker_init(struct kbase_context *kctx)
 				KBASE_REG_ZONE_EXEC);
 
 		if (!exec_reg) {
-			kbase_free_alloced_region(same_va_reg);
-			return -ENOMEM;
+			err = -ENOMEM;
+			goto fail_free_same_va;
 		}
 
 		custom_va_reg = kbase_alloc_free_region(kctx,
@@ -510,9 +537,8 @@ int kbase_region_tracker_init(struct kbase_context *kctx)
 				custom_va_size, KBASE_REG_ZONE_CUSTOM_VA);
 
 		if (!custom_va_reg) {
-			kbase_free_alloced_region(same_va_reg);
-			kbase_free_alloced_region(exec_reg);
-			return -ENOMEM;
+			err = -ENOMEM;
+			goto fail_free_exec;
 		}
 #ifdef CONFIG_64BIT
 	}
@@ -520,8 +546,6 @@ int kbase_region_tracker_init(struct kbase_context *kctx)
 
 	kbase_region_tracker_ds_init(kctx, same_va_reg, exec_reg, custom_va_reg);
 
-<<<<<<< HEAD
-=======
 	kctx->same_va_end = same_va_pages + 1;
 
 	kbase_gpu_vm_unlock(kctx);
@@ -622,8 +646,8 @@ fail_unlock:
 	kbase_gpu_vm_unlock(kctx);
 	return err;
 #else
->>>>>>> upsteam/release-4.4
 	return 0;
+#endif
 }
 
 int kbase_mem_init(struct kbase_device *kbdev)
@@ -721,8 +745,46 @@ KBASE_EXPORT_TEST_API(kbase_alloc_free_region);
  */
 void kbase_free_alloced_region(struct kbase_va_region *reg)
 {
-	KBASE_DEBUG_ASSERT(NULL != reg);
 	if (!(reg->flags & KBASE_REG_FREE)) {
+		/*
+		 * The physical allocation should have been removed from the
+		 * eviction list before this function is called. However, in the
+		 * case of abnormal process termination or the app leaking the
+		 * memory kbase_mem_free_region is not called so it can still be
+		 * on the list at termination time of the region tracker.
+		 */
+		if (!list_empty(&reg->gpu_alloc->evict_node)) {
+			/*
+			 * Unlink the physical allocation before unmaking it
+			 * evictable so that the allocation isn't grown back to
+			 * its last backed size as we're going to unmap it
+			 * anyway.
+			 */
+			reg->cpu_alloc->reg = NULL;
+			if (reg->cpu_alloc != reg->gpu_alloc)
+				reg->gpu_alloc->reg = NULL;
+
+			/*
+			 * If a region has been made evictable then we must
+			 * unmake it before trying to free it.
+			 * If the memory hasn't been reclaimed it will be
+			 * unmapped and freed below, if it has been reclaimed
+			 * then the operations below are no-ops.
+			 */
+			if (reg->flags & KBASE_REG_DONT_NEED) {
+				KBASE_DEBUG_ASSERT(reg->cpu_alloc->type ==
+						   KBASE_MEM_TYPE_NATIVE);
+				kbase_mem_evictable_unmake(reg->gpu_alloc);
+			}
+		}
+
+		/*
+		 * Remove the region from the sticky resource metadata
+		 * list should it be there.
+		 */
+		kbase_sticky_resource_release(reg->kctx, NULL,
+				reg->start_pfn << PAGE_SHIFT);
+
 		kbase_mem_phy_alloc_put(reg->cpu_alloc);
 		kbase_mem_phy_alloc_put(reg->gpu_alloc);
 		/* To detect use-after-free in debug builds */
@@ -732,41 +794,6 @@ void kbase_free_alloced_region(struct kbase_va_region *reg)
 }
 
 KBASE_EXPORT_TEST_API(kbase_free_alloced_region);
-
-void kbase_mmu_update(struct kbase_context *kctx)
-{
-	KBASE_DEBUG_ASSERT(NULL != kctx);
-	lockdep_assert_held(&kctx->kbdev->js_data.runpool_irq.lock);
-	/* ASSERT that the context has a valid as_nr, which is only the case
-	 * when it's scheduled in.
-	 *
-	 * as_nr won't change because the caller has the runpool_irq lock */
-	KBASE_DEBUG_ASSERT(kctx->as_nr != KBASEP_AS_NR_INVALID);
-	lockdep_assert_held(&kctx->kbdev->as[kctx->as_nr].transaction_mutex);
-
-	kctx->kbdev->mmu_mode->update(kctx);
-}
-
-KBASE_EXPORT_TEST_API(kbase_mmu_update);
-
-void kbase_mmu_disable(struct kbase_context *kctx)
-{
-	KBASE_DEBUG_ASSERT(NULL != kctx);
-	/* ASSERT that the context has a valid as_nr, which is only the case
-	 * when it's scheduled in.
-	 *
-	 * as_nr won't change because the caller has the runpool_irq lock */
-	KBASE_DEBUG_ASSERT(kctx->as_nr != KBASEP_AS_NR_INVALID);
-
-	kctx->kbdev->mmu_mode->disable_as(kctx->kbdev, kctx->as_nr);
-}
-
-KBASE_EXPORT_TEST_API(kbase_mmu_disable);
-
-void kbase_mmu_disable_as(struct kbase_device *kbdev, int as_nr)
-{
-	kbdev->mmu_mode->disable_as(kbdev, as_nr);
-}
 
 int kbase_gpu_mmap(struct kbase_context *kctx, struct kbase_va_region *reg, u64 addr, size_t nr_pages, size_t align)
 {
@@ -999,10 +1026,10 @@ static int kbase_do_syncset(struct kbase_context *kctx,
 
 	/* find the region where the virtual address is contained */
 	reg = kbase_region_tracker_find_region_enclosing_address(kctx,
-			sset->mem_handle);
+			sset->mem_handle.basep.handle);
 	if (!reg) {
 		dev_warn(kctx->kbdev->dev, "Can't find region at VA 0x%016llX",
-				sset->mem_handle);
+				sset->mem_handle.basep.handle);
 		err = -EINVAL;
 		goto out_unlock;
 	}
@@ -1016,7 +1043,7 @@ static int kbase_do_syncset(struct kbase_context *kctx,
 	map = kbasep_find_enclosing_cpu_mapping_of_region(reg, start, size);
 	if (!map) {
 		dev_warn(kctx->kbdev->dev, "Can't find CPU mapping 0x%016lX for VA 0x%016llX",
-				start, sset->mem_handle);
+				start, sset->mem_handle.basep.handle);
 		err = -EINVAL;
 		goto out_unlock;
 	}
@@ -1097,17 +1124,34 @@ int kbase_mem_free_region(struct kbase_context *kctx, struct kbase_va_region *re
 	KBASE_DEBUG_ASSERT(NULL != kctx);
 	KBASE_DEBUG_ASSERT(NULL != reg);
 	lockdep_assert_held(&kctx->reg_lock);
+
+	/*
+	 * Unlink the physical allocation before unmaking it evictable so
+	 * that the allocation isn't grown back to its last backed size
+	 * as we're going to unmap it anyway.
+	 */
+	reg->cpu_alloc->reg = NULL;
+	if (reg->cpu_alloc != reg->gpu_alloc)
+		reg->gpu_alloc->reg = NULL;
+
+	/*
+	 * If a region has been made evictable then we must unmake it
+	 * before trying to free it.
+	 * If the memory hasn't been reclaimed it will be unmapped and freed
+	 * below, if it has been reclaimed then the operations below are no-ops.
+	 */
+	if (reg->flags & KBASE_REG_DONT_NEED) {
+		KBASE_DEBUG_ASSERT(reg->cpu_alloc->type ==
+				   KBASE_MEM_TYPE_NATIVE);
+		kbase_mem_evictable_unmake(reg->gpu_alloc);
+	}
+
 	err = kbase_gpu_munmap(kctx, reg);
 	if (err) {
 		dev_warn(reg->kctx->kbdev->dev, "Could not unmap from the GPU...\n");
 		goto out;
 	}
-#ifndef CONFIG_MALI_NO_MALI
-	if (kbase_hw_has_issue(kctx->kbdev, BASE_HW_ISSUE_6367)) {
-		/* Wait for GPU to flush write buffer before freeing physical pages */
-		kbase_wait_write_flush(kctx);
-	}
-#endif
+
 	/* This will also free the physical pages */
 	kbase_free_alloced_region(reg);
 
@@ -1154,7 +1198,6 @@ int kbase_mem_free(struct kbase_context *kctx, u64 gpu_addr)
 		kbase_free_alloced_region(reg);
 	} else {
 		/* A real GPU va */
-
 		/* Validate the region */
 		reg = kbase_region_tracker_find_region_base_address(kctx, gpu_addr);
 		if (!reg || (reg->flags & KBASE_REG_FREE)) {
@@ -1171,7 +1214,6 @@ int kbase_mem_free(struct kbase_context *kctx, u64 gpu_addr)
 			err = -EINVAL;
 			goto out_unlock;
 		}
-
 		err = kbase_mem_free_region(kctx, reg);
 	}
 
@@ -1233,8 +1275,8 @@ int kbase_alloc_phy_pages_helper(
 	size_t nr_pages_requested)
 {
 	int new_page_count __maybe_unused;
+	size_t old_page_count = alloc->nents;
 
-	KBASE_DEBUG_ASSERT(alloc);
 	KBASE_DEBUG_ASSERT(alloc->type == KBASE_MEM_TYPE_NATIVE);
 	KBASE_DEBUG_ASSERT(alloc->imported.kctx);
 
@@ -1250,14 +1292,21 @@ int kbase_alloc_phy_pages_helper(
 	kbase_process_page_usage_inc(alloc->imported.kctx, nr_pages_requested);
 
 	if (kbase_mem_pool_alloc_pages(&alloc->imported.kctx->mem_pool,
-			nr_pages_requested, alloc->pages + alloc->nents) != 0)
+			nr_pages_requested, alloc->pages + old_page_count) != 0)
 		goto no_alloc;
 
-#if defined(CONFIG_MALI_MIPE_ENABLED)
+	/*
+	 * Request a zone cache update, this scans only the new pages an
+	 * appends their information to the zone cache. if the update
+	 * fails then clear the cache so we fall-back to doing things
+	 * page by page.
+	 */
+	if (kbase_zone_cache_update(alloc, old_page_count) != 0)
+		kbase_zone_cache_clear(alloc);
+
 	kbase_tlstream_aux_pagesalloc(
 			(u32)alloc->imported.kctx->id,
 			(u64)new_page_count);
-#endif
 
 	alloc->nents += nr_pages_requested;
 done:
@@ -1275,11 +1324,12 @@ int kbase_free_phy_pages_helper(
 	struct kbase_mem_phy_alloc *alloc,
 	size_t nr_pages_to_free)
 {
+	struct kbase_context *kctx = alloc->imported.kctx;
 	bool syncback;
+	bool reclaimed = (alloc->evicted != 0);
 	phys_addr_t *start_free;
 	int new_page_count __maybe_unused;
 
-	KBASE_DEBUG_ASSERT(alloc);
 	KBASE_DEBUG_ASSERT(alloc->type == KBASE_MEM_TYPE_NATIVE);
 	KBASE_DEBUG_ASSERT(alloc->imported.kctx);
 	KBASE_DEBUG_ASSERT(alloc->nents >= nr_pages_to_free);
@@ -1292,22 +1342,37 @@ int kbase_free_phy_pages_helper(
 
 	syncback = alloc->properties & KBASE_MEM_PHY_ALLOC_ACCESSED_CACHED;
 
-	kbase_mem_pool_free_pages(&alloc->imported.kctx->mem_pool,
+	/*
+	 * Clear the zone cache, we don't expect JIT allocations to be
+	 * shrunk in parts so there is no point trying to optimize for that
+	 * by scanning for the changes caused by freeing this memory and
+	 * updating the existing cache entries.
+	 */
+	kbase_zone_cache_clear(alloc);
+
+	kbase_mem_pool_free_pages(&kctx->mem_pool,
 				  nr_pages_to_free,
 				  start_free,
-				  syncback);
+				  syncback,
+				  reclaimed);
 
 	alloc->nents -= nr_pages_to_free;
-	kbase_process_page_usage_dec(alloc->imported.kctx, nr_pages_to_free);
-	new_page_count = kbase_atomic_sub_pages(
-			nr_pages_to_free, &alloc->imported.kctx->used_pages);
-	kbase_atomic_sub_pages(nr_pages_to_free, &alloc->imported.kctx->kbdev->memdev.used_pages);
 
-#if defined(CONFIG_MALI_MIPE_ENABLED)
-	kbase_tlstream_aux_pagesalloc(
-			(u32)alloc->imported.kctx->id,
-			(u64)new_page_count);
-#endif
+	/*
+	 * If the allocation was not evicted (i.e. evicted == 0) then
+	 * the page accounting needs to be done.
+	 */
+	if (!reclaimed) {
+		kbase_process_page_usage_dec(kctx, nr_pages_to_free);
+		new_page_count = kbase_atomic_sub_pages(nr_pages_to_free,
+							&kctx->used_pages);
+		kbase_atomic_sub_pages(nr_pages_to_free,
+				       &kctx->kbdev->memdev.used_pages);
+
+		kbase_tlstream_aux_pagesalloc(
+				(u32)kctx->id,
+				(u64)new_page_count);
+	}
 
 	return 0;
 }
@@ -1320,7 +1385,12 @@ void kbase_mem_kref_free(struct kref *kref)
 
 	switch (alloc->type) {
 	case KBASE_MEM_TYPE_NATIVE: {
-		KBASE_DEBUG_ASSERT(alloc->imported.kctx);
+		WARN_ON(!alloc->imported.kctx);
+		/*
+		 * The physical allocation must have been removed from the
+		 * eviction list before trying to free it.
+		 */
+		WARN_ON(!list_empty(&alloc->evict_node));
 		kbase_free_phy_pages_helper(alloc, alloc->nents);
 		break;
 	}
@@ -1354,6 +1424,8 @@ void kbase_mem_kref_free(struct kref *kref)
 		break;
 #endif
 	case KBASE_MEM_TYPE_IMPORTED_USER_BUF:
+		if (alloc->imported.user_buf.mm)
+			mmdrop(alloc->imported.user_buf.mm);
 		kfree(alloc->imported.user_buf.pages);
 		break;
 	case KBASE_MEM_TYPE_TB:{
@@ -1398,9 +1470,11 @@ int kbase_alloc_phy_pages(struct kbase_va_region *reg, size_t vsize, size_t size
 	if (kbase_alloc_phy_pages_helper(reg->cpu_alloc, size) != 0)
 		goto out_term;
 
+	reg->cpu_alloc->reg = reg;
 	if (reg->cpu_alloc != reg->gpu_alloc) {
 		if (kbase_alloc_phy_pages_helper(reg->gpu_alloc, size) != 0)
 			goto out_rollback;
+		reg->gpu_alloc->reg = reg;
 	}
 
 	return 0;
@@ -1438,6 +1512,10 @@ bool kbase_check_alloc_flags(unsigned long flags)
 	/* GPU should have at least read or write access otherwise there is no
 	   reason for allocating. */
 	if ((flags & (BASE_MEM_PROT_GPU_RD | BASE_MEM_PROT_GPU_WR)) == 0)
+		return false;
+
+	/* BASE_MEM_IMPORT_SHARED is only valid for imported memory */
+	if ((flags & BASE_MEM_IMPORT_SHARED) == BASE_MEM_IMPORT_SHARED)
 		return false;
 
 	return true;
@@ -1494,8 +1572,6 @@ void kbase_gpu_vm_unlock(struct kbase_context *kctx)
 }
 
 KBASE_EXPORT_TEST_API(kbase_gpu_vm_unlock);
-<<<<<<< HEAD
-=======
 
 #ifdef CONFIG_DEBUG_FS
 struct kbase_jit_debugfs_data {
@@ -2054,10 +2130,6 @@ static void kbase_jd_user_buf_unmap(struct kbase_context *kctx,
 	alloc->nents = 0;
 }
 
-
-/* to replace sg_dma_len. */
-#define MALI_SG_DMA_LEN(sg)        ((sg)->length)
-
 #ifdef CONFIG_DMA_SHARED_BUFFER
 static int kbase_jd_umm_map(struct kbase_context *kctx,
 		struct kbase_va_region *reg)
@@ -2088,11 +2160,11 @@ static int kbase_jd_umm_map(struct kbase_context *kctx,
 
 	for_each_sg(sgt->sgl, s, sgt->nents, i) {
 		int j;
-		size_t pages = PFN_UP(MALI_SG_DMA_LEN(s));
+		size_t pages = PFN_UP(sg_dma_len(s));
 
-		WARN_ONCE(MALI_SG_DMA_LEN(s) & (PAGE_SIZE-1),
-		"MALI_SG_DMA_LEN(s)=%u is not a multiple of PAGE_SIZE\n",
-		MALI_SG_DMA_LEN(s));
+		WARN_ONCE(sg_dma_len(s) & (PAGE_SIZE-1),
+		"sg_dma_len(s)=%u is not a multiple of PAGE_SIZE\n",
+		sg_dma_len(s));
 
 		WARN_ONCE(sg_dma_address(s) & (PAGE_SIZE-1),
 		"sg_dma_address(s)=%llx is not aligned to PAGE_SIZE\n",
@@ -2416,4 +2488,3 @@ void kbase_sticky_resource_term(struct kbase_context *kctx)
 		kbase_sticky_resource_release(kctx, walker, 0);
 	}
 }
->>>>>>> upsteam/release-4.4

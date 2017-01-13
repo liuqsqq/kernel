@@ -1,6 +1,6 @@
 /*
  *
- * (C) COPYRIGHT 2012-2015 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2012-2016 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -37,8 +37,6 @@ void kbase_hw_set_features_mask(struct kbase_device *kbdev)
 	product_id = gpu_id & GPU_ID_VERSION_PRODUCT_ID;
 	product_id >>= GPU_ID_VERSION_PRODUCT_ID_SHIFT;
 
-<<<<<<< HEAD
-=======
 	if (GPU_ID_IS_NEW_FORMAT(product_id)) {
 		switch (gpu_id & GPU_ID2_PRODUCT_MODEL) {
 		case GPU_ID2_PRODUCT_TMIX:
@@ -52,7 +50,6 @@ void kbase_hw_set_features_mask(struct kbase_device *kbdev)
 			break;
 		}
 	} else {
->>>>>>> upsteam/release-4.4
 		switch (product_id) {
 		case GPU_ID_PI_TFRX:
 			/* FALLTHROUGH */
@@ -81,7 +78,7 @@ void kbase_hw_set_features_mask(struct kbase_device *kbdev)
 			features = base_hw_features_generic;
 			break;
 		}
-
+	}
 
 	for (; *features != BASE_HW_FEATURE_END; features++)
 		set_bit(*features, &kbdev->hw_features_mask[0]);
@@ -100,8 +97,6 @@ int kbase_hw_set_issues_mask(struct kbase_device *kbdev)
 	impl_tech = kbdev->gpu_props.props.thread_props.impl_tech;
 
 	if (impl_tech != IMPLEMENTATION_MODEL) {
-<<<<<<< HEAD
-=======
 		if (GPU_ID_IS_NEW_FORMAT(product_id)) {
 			switch (gpu_id) {
 			case GPU_ID2_MAKE(6, 0, 10, 0, 0, 0, 1):
@@ -124,7 +119,6 @@ int kbase_hw_set_issues_mask(struct kbase_device *kbdev)
 				}
 			}
 		} else {
->>>>>>> upsteam/release-4.4
 			switch (gpu_id) {
 			case GPU_ID_MAKE(GPU_ID_PI_T60X, 0, 0, GPU_ID_S_15DEV0):
 				issues = base_hw_issues_t60x_r0p0_15dev0;
@@ -215,13 +209,13 @@ int kbase_hw_set_issues_mask(struct kbase_device *kbdev)
 				issues = base_hw_issues_t82x_r1p0;
 				break;
 			default:
-				dev_err(kbdev->dev, "Unknown GPU ID %x", gpu_id);
+				dev_err(kbdev->dev,
+					"Unknown GPU ID %x", gpu_id);
 				return -EINVAL;
 			}
+		}
 	} else {
 		/* Software model */
-<<<<<<< HEAD
-=======
 		if (GPU_ID_IS_NEW_FORMAT(product_id)) {
 			switch (gpu_id & GPU_ID2_PRODUCT_MODEL) {
 			case GPU_ID2_PRODUCT_TMIX:
@@ -236,7 +230,6 @@ int kbase_hw_set_issues_mask(struct kbase_device *kbdev)
 				return -EINVAL;
 			}
 		} else {
->>>>>>> upsteam/release-4.4
 			switch (product_id) {
 			case GPU_ID_PI_T60X:
 				issues = base_hw_issues_model_t60x;
@@ -267,6 +260,7 @@ int kbase_hw_set_issues_mask(struct kbase_device *kbdev)
 					gpu_id);
 				return -EINVAL;
 			}
+		}
 	}
 
 	dev_info(kbdev->dev, "GPU identified as 0x%04x r%dp%d status %d", (gpu_id & GPU_ID_VERSION_PRODUCT_ID) >> GPU_ID_VERSION_PRODUCT_ID_SHIFT, (gpu_id & GPU_ID_VERSION_MAJOR) >> GPU_ID_VERSION_MAJOR_SHIFT, (gpu_id & GPU_ID_VERSION_MINOR) >> GPU_ID_VERSION_MINOR_SHIFT, (gpu_id & GPU_ID_VERSION_STATUS) >> GPU_ID_VERSION_STATUS_SHIFT);

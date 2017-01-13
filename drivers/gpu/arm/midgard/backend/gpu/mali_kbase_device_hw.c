@@ -1,6 +1,6 @@
 /*
  *
- * (C) COPYRIGHT 2014-2015 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2014-2016 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -155,10 +155,6 @@ void kbase_reg_write(struct kbase_device *kbdev, u16 offset, u32 value,
 	KBASE_DEBUG_ASSERT(kbdev->pm.backend.gpu_powered);
 	KBASE_DEBUG_ASSERT(kctx == NULL || kctx->as_nr != KBASEP_AS_NR_INVALID);
 	KBASE_DEBUG_ASSERT(kbdev->dev != NULL);
-<<<<<<< HEAD
-	dev_dbg(kbdev->dev, "w: reg %04x val %08x", offset, value);
-	writel(value, kbdev->reg + offset);
-=======
 
 	writel(value, kbdev->reg + offset);
 
@@ -169,7 +165,6 @@ void kbase_reg_write(struct kbase_device *kbdev, u16 offset, u32 value,
 #endif /* CONFIG_DEBUG_FS */
 	dev_dbg(kbdev->dev, "w: reg %04x val %08x", offset, value);
 
->>>>>>> upsteam/release-4.4
 	if (kctx && kctx->jctx.tb)
 		kbase_device_trace_register_access(kctx, REG_WRITE, offset,
 									value);
@@ -184,16 +179,14 @@ u32 kbase_reg_read(struct kbase_device *kbdev, u16 offset,
 	KBASE_DEBUG_ASSERT(kbdev->pm.backend.gpu_powered);
 	KBASE_DEBUG_ASSERT(kctx == NULL || kctx->as_nr != KBASEP_AS_NR_INVALID);
 	KBASE_DEBUG_ASSERT(kbdev->dev != NULL);
+
 	val = readl(kbdev->reg + offset);
-<<<<<<< HEAD
-=======
 
 #ifdef CONFIG_DEBUG_FS
 	if (unlikely(kbdev->io_history.enabled))
 		kbase_io_history_add(&kbdev->io_history, kbdev->reg + offset,
 				val, 0);
 #endif /* CONFIG_DEBUG_FS */
->>>>>>> upsteam/release-4.4
 	dev_dbg(kbdev->dev, "r: reg %04x val %08x", offset, val);
 
 	if (kctx && kctx->jctx.tb)

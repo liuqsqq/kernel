@@ -1,6 +1,6 @@
 /*
  *
- * (C) COPYRIGHT 2014-2015 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2014-2016 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -13,9 +13,6 @@
  *
  */
 
-
-#define ENABLE_DEBUG_LOG
-#include "../../platform/rk/custom_log.h"
 
 
 #include <mali_kbase.h>
@@ -138,6 +135,14 @@ kbase_devfreq_status(struct device *dev, struct devfreq_dev_status *stat)
 
 	stat->private_data = NULL;
 
+#ifdef CONFIG_DEVFREQ_THERMAL
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 3, 0)
+	if (kbdev->devfreq_cooling)
+		memcpy(&kbdev->devfreq_cooling->last_status, stat,
+				sizeof(*stat));
+#endif
+#endif
+
 	return 0;
 }
 
@@ -256,7 +261,6 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 	} else {
 		err = 0;
 	}
-	I("success initing power_model_simple.");
 #endif
 
 	return 0;

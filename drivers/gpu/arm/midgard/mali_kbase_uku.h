@@ -1,6 +1,6 @@
 /*
  *
- * (C) COPYRIGHT 2008-2015 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2008-2016 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -45,11 +45,6 @@
  * 10.1:
  * - Do mmap in kernel for SAME_VA memory allocations rather then
  *   calling back into the kernel as a 2nd stage of the allocation request.
-<<<<<<< HEAD
- */
-#define BASE_UK_VERSION_MAJOR 10
-#define BASE_UK_VERSION_MINOR 1
-=======
  *
  * 10.2:
  * - Add KBASE_FUNC_MEM_JIT_INIT which allows clients to request a custom VA
@@ -70,7 +65,6 @@
  */
 #define BASE_UK_VERSION_MAJOR 10
 #define BASE_UK_VERSION_MINOR 6
->>>>>>> upsteam/release-4.4
 
 struct kbase_uk_mem_alloc {
 	union uk_header header;
@@ -262,7 +256,6 @@ struct kbase_uk_get_ddk_version {
 	char version_buffer[KBASE_GET_VERSION_BUFFER_SIZE];
 	u32 version_string_size;
 	u32 padding;
-	u32 rk_version;
 };
 
 struct kbase_uk_disjoint_query {
@@ -315,16 +308,6 @@ struct kbase_uk_model_control_params {
 };
 #endif				/* SUPPORT_MALI_NO_MALI */
 
-#define KBASE_MAXIMUM_EXT_RESOURCES       255
-
-struct kbase_uk_ext_buff_kds_data {
-	union uk_header header;
-	union kbase_pointer external_resource;
-	union kbase_pointer file_descriptor;
-	u32 num_res;		/* limited to KBASE_MAXIMUM_EXT_RESOURCES */
-	u32 padding;
-};
-
 #ifdef BASE_LEGACY_UK8_SUPPORT
 struct kbase_uk_keep_gpu_powered {
 	union uk_header header;
@@ -351,8 +334,8 @@ struct kbase_uk_context_id {
 	int id;
 };
 
-#if (defined(MALI_KTLSTREAM_ENABLED) && MALI_KTLSTREAM_ENABLED) || \
-	defined(CONFIG_MALI_MIPE_ENABLED)
+#if (defined(MALI_MIPE_ENABLED) && MALI_MIPE_ENABLED) || \
+	!defined(MALI_MIPE_ENABLED)
 /**
  * struct kbase_uk_tlstream_acquire - User/Kernel space data exchange structure
  * @header: UK structure header
@@ -438,7 +421,7 @@ struct kbase_uk_tlstream_stats {
 	u32 bytes_generated;
 };
 #endif /* MALI_UNIT_TEST */
-#endif /* MALI_KTLSTREAM_ENABLED */
+#endif /* MALI_MIPE_ENABLED */
 
 /**
  * struct struct kbase_uk_prfcnt_value for the KBASE_FUNC_SET_PRFCNT_VALUES ioctl
@@ -453,6 +436,38 @@ struct kbase_uk_prfcnt_values {
 	u32 size;
 };
 
+/**
+ * struct kbase_uk_soft_event_update - User/Kernel space data exchange structure
+ * @header:     UK structure header
+ * @evt:        the GPU address containing the event
+ * @new_status: the new event status, must be either BASE_JD_SOFT_EVENT_SET or
+ *              BASE_JD_SOFT_EVENT_RESET
+ * @flags:      reserved for future uses, must be set to 0
+ *
+ * This structure is used to update the status of a software event. If the
+ * event's status is set to BASE_JD_SOFT_EVENT_SET, any job currently waiting
+ * on this event will complete.
+ */
+struct kbase_uk_soft_event_update {
+	union uk_header header;
+	/* IN */
+	u64 evt;
+	u32 new_status;
+	u32 flags;
+};
+
+/**
+ * struct kbase_uk_mem_jit_init - User/Kernel space data exchange structure
+ * @header:     UK structure header
+ * @va_pages:   Number of virtual pages required for JIT
+ *
+ * This structure is used when requesting initialization of JIT.
+ */
+struct kbase_uk_mem_jit_init {
+	union uk_header header;
+	/* IN */
+	u64 va_pages;
+};
 
 enum kbase_uk_function_id {
 	KBASE_FUNC_MEM_ALLOC = (UK_FUNC_ID + 0),
@@ -480,7 +495,6 @@ enum kbase_uk_function_id {
 	KBASE_FUNC_FIND_CPU_OFFSET = (UK_FUNC_ID + 15),
 
 	KBASE_FUNC_GET_VERSION = (UK_FUNC_ID + 16),
-	KBASE_FUNC_EXT_BUFFER_LOCK = (UK_FUNC_ID + 17),
 	KBASE_FUNC_SET_FLAGS = (UK_FUNC_ID + 18),
 
 	KBASE_FUNC_SET_TEST_DATA = (UK_FUNC_ID + 19),
@@ -505,21 +519,15 @@ enum kbase_uk_function_id {
 
 	KBASE_FUNC_GET_CONTEXT_ID = (UK_FUNC_ID + 31),
 
-<<<<<<< HEAD
-#if (defined(MALI_KTLSTREAM_ENABLED) && MALI_KTLSTREAM_ENABLED) || \
-	defined(CONFIG_MALI_MIPE_ENABLED)
-	KBASE_FUNC_TLSTREAM_ACQUIRE = (UK_FUNC_ID + 32),
-=======
 #if (defined(MALI_MIPE_ENABLED) && MALI_MIPE_ENABLED) || \
 	!defined(MALI_MIPE_ENABLED)
 	KBASE_FUNC_TLSTREAM_ACQUIRE_V10_4 = (UK_FUNC_ID + 32),
->>>>>>> upsteam/release-4.4
 #if MALI_UNIT_TEST
 	KBASE_FUNC_TLSTREAM_TEST = (UK_FUNC_ID + 33),
 	KBASE_FUNC_TLSTREAM_STATS = (UK_FUNC_ID + 34),
 #endif /* MALI_UNIT_TEST */
 	KBASE_FUNC_TLSTREAM_FLUSH = (UK_FUNC_ID + 35),
-#endif /* MALI_KTLSTREAM_ENABLED */
+#endif /* MALI_MIPE_ENABLED */
 
 	KBASE_FUNC_HWCNT_READER_SETUP = (UK_FUNC_ID + 36),
 
@@ -527,8 +535,6 @@ enum kbase_uk_function_id {
 	KBASE_FUNC_SET_PRFCNT_VALUES = (UK_FUNC_ID + 37),
 #endif
 
-<<<<<<< HEAD
-=======
 	KBASE_FUNC_SOFT_EVENT_UPDATE = (UK_FUNC_ID + 38),
 
 	KBASE_FUNC_MEM_JIT_INIT = (UK_FUNC_ID + 39),
@@ -538,7 +544,6 @@ enum kbase_uk_function_id {
 	KBASE_FUNC_TLSTREAM_ACQUIRE = (UK_FUNC_ID + 40),
 #endif /* MALI_MIPE_ENABLED */
 
->>>>>>> upsteam/release-4.4
 	KBASE_FUNC_MAX
 };
 

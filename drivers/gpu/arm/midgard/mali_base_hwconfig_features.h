@@ -1,6 +1,6 @@
 /*
  *
- * (C) COPYRIGHT 2015 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2015-2016 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -27,6 +27,7 @@ enum base_hw_feature {
 	BASE_HW_FEATURE_JOBCHAIN_DISAMBIGUATION,
 	BASE_HW_FEATURE_PWRON_DURING_PWROFF_TRANS,
 	BASE_HW_FEATURE_33BIT_VA,
+	BASE_HW_FEATURE_XAFFINITY,
 	BASE_HW_FEATURE_OUT_OF_ORDER_EXEC,
 	BASE_HW_FEATURE_MRT,
 	BASE_HW_FEATURE_BRNDOUT_CC,
@@ -46,13 +47,10 @@ enum base_hw_feature {
 	BASE_HW_FEATURE_BRNDOUT_KILL,
 	BASE_HW_FEATURE_WARPING,
 	BASE_HW_FEATURE_V4,
-<<<<<<< HEAD
-=======
 	BASE_HW_FEATURE_FLUSH_REDUCTION,
 	BASE_HW_FEATURE_PROTECTED_MODE,
 	BASE_HW_FEATURE_COHERENCY_REG,
 	BASE_HW_FEATURE_PROTECTED_DEBUG_MODE,
->>>>>>> upsteam/release-4.4
 	BASE_HW_FEATURE_END
 };
 
@@ -91,6 +89,7 @@ static const enum base_hw_feature base_hw_features_t72x[] = {
 static const enum base_hw_feature base_hw_features_t76x[] = {
 	BASE_HW_FEATURE_JOBCHAIN_DISAMBIGUATION,
 	BASE_HW_FEATURE_PWRON_DURING_PWROFF_TRANS,
+	BASE_HW_FEATURE_XAFFINITY,
 	BASE_HW_FEATURE_32_BIT_UNIFORM_ADDRESS,
 	BASE_HW_FEATURE_ATTR_AUTO_TYPE_INFERRAL,
 	BASE_HW_FEATURE_BRNDOUT_CC,
@@ -108,6 +107,7 @@ static const enum base_hw_feature base_hw_features_t76x[] = {
 static const enum base_hw_feature base_hw_features_tFxx[] = {
 	BASE_HW_FEATURE_JOBCHAIN_DISAMBIGUATION,
 	BASE_HW_FEATURE_PWRON_DURING_PWROFF_TRANS,
+	BASE_HW_FEATURE_XAFFINITY,
 	BASE_HW_FEATURE_32_BIT_UNIFORM_ADDRESS,
 	BASE_HW_FEATURE_ATTR_AUTO_TYPE_INFERRAL,
 	BASE_HW_FEATURE_BRNDOUT_CC,
@@ -128,6 +128,7 @@ static const enum base_hw_feature base_hw_features_t83x[] = {
 	BASE_HW_FEATURE_33BIT_VA,
 	BASE_HW_FEATURE_JOBCHAIN_DISAMBIGUATION,
 	BASE_HW_FEATURE_PWRON_DURING_PWROFF_TRANS,
+	BASE_HW_FEATURE_XAFFINITY,
 	BASE_HW_FEATURE_WARPING,
 	BASE_HW_FEATURE_INTERPIPE_REG_ALIASING,
 	BASE_HW_FEATURE_32_BIT_UNIFORM_ADDRESS,
@@ -149,6 +150,7 @@ static const enum base_hw_feature base_hw_features_t82x[] = {
 	BASE_HW_FEATURE_33BIT_VA,
 	BASE_HW_FEATURE_JOBCHAIN_DISAMBIGUATION,
 	BASE_HW_FEATURE_PWRON_DURING_PWROFF_TRANS,
+	BASE_HW_FEATURE_XAFFINITY,
 	BASE_HW_FEATURE_WARPING,
 	BASE_HW_FEATURE_INTERPIPE_REG_ALIASING,
 	BASE_HW_FEATURE_32_BIT_UNIFORM_ADDRESS,
@@ -166,8 +168,6 @@ static const enum base_hw_feature base_hw_features_t82x[] = {
 	BASE_HW_FEATURE_END
 };
 
-<<<<<<< HEAD
-=======
 static const enum base_hw_feature base_hw_features_tMIx[] = {
 	BASE_HW_FEATURE_JOBCHAIN_DISAMBIGUATION,
 	BASE_HW_FEATURE_PWRON_DURING_PWROFF_TRANS,
@@ -219,6 +219,5 @@ static const enum base_hw_feature base_hw_features_tHEx[] = {
 	BASE_HW_FEATURE_END
 };
 
->>>>>>> upsteam/release-4.4
 
 #endif /* _BASE_HWCONFIG_FEATURES_H_ */
