@@ -193,6 +193,10 @@
 	status = "okay";
 };
 
+&hevc_service {
+	status = "okay";
+};
+
 &i2c0 {
 	status = "okay";
 	clock-frequency = <400000>;
@@ -439,6 +443,10 @@
 	wifi-supply = <&vccio_wl>;
 };
 
+&rga {
+	status = "okay";
+};
+
 &pinctrl {
 	ak8963 {
 		comp_int: comp-int {
@@ -502,6 +510,10 @@
 };
 
 &vopl_mmu {
+	status = "okay";
+};
+
+&vpu_service {
 	status = "okay";
 };
 

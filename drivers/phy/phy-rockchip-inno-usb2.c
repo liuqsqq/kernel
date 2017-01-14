@@ -191,6 +191,7 @@ struct rockchip_usb2phy_cfg {
  *	true	- use avalid to get vbus status
  *	flase	- use bvalid to get vbus status
  * @vbus_attached: otg device vbus status.
+ * @vbus_always_on: otg vbus is always powered on.
  * @bvalid_irq: IRQ number assigned for vbus valid rise detection.
  * @ls_irq: IRQ number assigned for linestate detection.
  * @id_irq: IRQ number assigned for id fall or rise detection.
@@ -212,6 +213,7 @@ struct rockchip_usb2phy_port {
 	bool		suspended;
 	bool		utmi_avalid;
 	bool		vbus_attached;
+	bool		vbus_always_on;
 	int		bvalid_irq;
 	int		ls_irq;
 	int		id_irq;
@@ -284,7 +286,7 @@ static inline bool property_enabled(struct rockchip_usb2phy *rphy,
 	return tmp == reg->enable;
 }
 
-static int rockchip_usb2phy_clk480m_enable(struct clk_hw *hw)
+static int rockchip_usb2phy_clk480m_prepare(struct clk_hw *hw)
 {
 	struct rockchip_usb2phy *rphy =
 		container_of(hw, struct rockchip_usb2phy, clk480m_hw);
@@ -296,14 +298,14 @@ static int rockchip_usb2phy_clk480m_enable(struct clk_hw *hw)
 		if (ret)
 			return ret;
 
-		/* waitting for the clk become stable */
-		udelay(1200);
+		/* waiting for the clk become stable */
+		usleep_range(1200, 1300);
 	}
 
 	return 0;
 }
 
-static void rockchip_usb2phy_clk480m_disable(struct clk_hw *hw)
+static void rockchip_usb2phy_clk480m_unprepare(struct clk_hw *hw)
 {
 	struct rockchip_usb2phy *rphy =
 		container_of(hw, struct rockchip_usb2phy, clk480m_hw);
@@ -312,7 +314,7 @@ static void rockchip_usb2phy_clk480m_disable(struct clk_hw *hw)
 	property_enable(rphy, &rphy->phy_cfg->clkout_ctl, false);
 }
 
-static int rockchip_usb2phy_clk480m_enabled(struct clk_hw *hw)
+static int rockchip_usb2phy_clk480m_prepared(struct clk_hw *hw)
 {
 	struct rockchip_usb2phy *rphy =
 		container_of(hw, struct rockchip_usb2phy, clk480m_hw);
@@ -328,9 +330,9 @@ rockchip_usb2phy_clk480m_recalc_rate(struct clk_hw *hw,
 }
 
 static const struct clk_ops rockchip_usb2phy_clkout_ops = {
-	.enable = rockchip_usb2phy_clk480m_enable,
-	.disable = rockchip_usb2phy_clk480m_disable,
-	.is_enabled = rockchip_usb2phy_clk480m_enabled,
+	.prepare = rockchip_usb2phy_clk480m_prepare,
+	.unprepare = rockchip_usb2phy_clk480m_unprepare,
+	.is_prepared = rockchip_usb2phy_clk480m_prepared,
 	.recalc_rate = rockchip_usb2phy_clk480m_recalc_rate,
 };
 
@@ -438,7 +440,8 @@ static int rockchip_usb2phy_init(struct phy *phy)
 	mutex_lock(&rport->mutex);
 
 	if (rport->port_id == USB2PHY_PORT_OTG) {
-		if (rport->mode != USB_DR_MODE_HOST) {
+		if (rport->mode != USB_DR_MODE_HOST &&
+		    !rport->vbus_always_on) {
 			/* clear bvalid status and enable bvalid detect irq */
 			ret = property_enable(rphy,
 					      &rport->port_cfg->
@@ -557,7 +560,8 @@ static int rockchip_usb2phy_exit(struct phy *phy)
 	struct rockchip_usb2phy_port *rport = phy_get_drvdata(phy);
 
 	if (rport->port_id == USB2PHY_PORT_OTG &&
-	    rport->mode != USB_DR_MODE_HOST)
+	    rport->mode != USB_DR_MODE_HOST &&
+	    !rport->vbus_always_on)
 		cancel_delayed_work_sync(&rport->chg_work);
 	else if (rport->port_id == USB2PHY_PORT_HOST)
 		cancel_delayed_work_sync(&rport->sm_work);
@@ -959,6 +963,8 @@ static irqreturn_t rockchip_usb2phy_linestate_irq(int irq, void *data)
 	if (!property_enabled(rphy, &rport->port_cfg->ls_det_st))
 		return IRQ_NONE;
 
+	dev_dbg(&rport->phy->dev, "linestate interrupt\n");
+
 	mutex_lock(&rport->mutex);
 
 	/* disable linestate detect irq and clear its status */
@@ -972,8 +978,12 @@ static irqreturn_t rockchip_usb2phy_linestate_irq(int irq, void *data)
 	 * meanwhile, if the phy port is suspended, we need rearm the work to
 	 * resume it and mange its states; otherwise, we do nothing about that.
 	 */
-	if (rport->suspended && rport->port_id == USB2PHY_PORT_HOST)
-		rockchip_usb2phy_sm_work(&rport->sm_work.work);
+	if (rport->suspended) {
+		if (rport->port_id == USB2PHY_PORT_HOST)
+			rockchip_usb2phy_sm_work(&rport->sm_work.work);
+		else
+			rockchip_usb2phy_power_on(rport->phy);
+	}
 
 	return IRQ_HANDLED;
 }
@@ -1095,8 +1105,26 @@ static int rockchip_usb2phy_otg_port_init(struct rockchip_usb2phy *rphy,
 
 	mutex_init(&rport->mutex);
 
+	rport->ls_irq = of_irq_get_byname(child_np, "linestate");
+	if (rport->ls_irq < 0) {
+		dev_err(rphy->dev, "no linestate irq provided\n");
+		return rport->ls_irq;
+	}
+
+	ret = devm_request_threaded_irq(rphy->dev, rport->ls_irq, NULL,
+					rockchip_usb2phy_linestate_irq,
+					IRQF_ONESHOT,
+					"rockchip_usb2phy", rport);
+	if (ret) {
+		dev_err(rphy->dev, "failed to request linestate irq handle\n");
+		return ret;
+	}
+
+	rport->vbus_always_on =
+		of_property_read_bool(child_np, "rockchip,vbus-always-on");
+
 	rport->mode = of_usb_get_dr_mode_by_phy(child_np, -1);
-	if (rport->mode == USB_DR_MODE_HOST)
+	if (rport->mode == USB_DR_MODE_HOST || rport->vbus_always_on)
 		return 0;
 
 	wake_lock_init(&rport->wakelock, WAKE_LOCK_SUSPEND, "rockchip_otg");
@@ -1316,6 +1344,98 @@ static int rk3366_usb2phy_tuning(struct rockchip_usb2phy *rphy)
 	return ret;
 }
 
+static int rk3399_usb2phy_tuning(struct rockchip_usb2phy *rphy)
+{
+	struct device_node *node = rphy->dev->of_node;
+	int ret = 0;
+
+	if (!of_property_read_bool(node, "rockchip,u2phy-tuning"))
+		return ret;
+
+	if (rphy->phy_cfg->reg == 0xe450) {
+		/*
+		 * Set max ODT compensation voltage and
+		 * current tuning reference for PHY0.
+		 */
+		ret |= regmap_write(rphy->grf, 0x448c,
+				    GENMASK(23, 16) | 0xe3);
+
+		/* Set max pre-emphasis level for PHY0 */
+		ret |= regmap_write(rphy->grf, 0x44b0,
+				    GENMASK(18, 16) | 0x07);
+
+		/*
+		 * Disable the pre-emphasize in eop state
+		 * and chirp state to avoid mis-trigger the
+		 * disconnect detection and also avoid hs
+		 * handshake fail for PHY0.
+		 */
+		ret |= regmap_write(rphy->grf, 0x4480,
+				    GENMASK(17, 16) | 0x0);
+		ret |= regmap_write(rphy->grf, 0x44b4,
+				    GENMASK(17, 16) | 0x0);
+	} else {
+		/*
+		 * Set max ODT compensation voltage and
+		 * current tuning reference for PHY1.
+		 */
+		ret |= regmap_write(rphy->grf, 0x450c,
+				    GENMASK(23, 16) | 0xe3);
+
+		/* Set max pre-emphasis level for PHY1 */
+		ret |= regmap_write(rphy->grf, 0x4530,
+				    GENMASK(18, 16) | 0x07);
+
+		/*
+		 * Disable the pre-emphasize in eop state
+		 * and chirp state to avoid mis-trigger the
+		 * disconnect detection and also avoid hs
+		 * handshake fail for PHY1.
+		 */
+		ret |= regmap_write(rphy->grf, 0x4500,
+				    GENMASK(17, 16) | 0x0);
+		ret |= regmap_write(rphy->grf, 0x4534,
+				    GENMASK(17, 16) | 0x0);
+	}
+
+	return ret;
+}
+
+#ifdef CONFIG_PM_SLEEP
+static int rockchip_usb2phy_pm_suspend(struct device *dev)
+{
+	struct rockchip_usb2phy *rphy = dev_get_drvdata(dev);
+	struct rockchip_usb2phy_port *rport;
+	int index;
+
+	for (index = 0; index < rphy->phy_cfg->num_ports; index++) {
+		rport = &rphy->ports[index];
+		if (!rport->phy)
+			continue;
+
+		/* activate the linestate to detect the next interrupt. */
+		property_enable(rphy, &rport->port_cfg->ls_det_clr, true);
+		property_enable(rphy, &rport->port_cfg->ls_det_en, true);
+	}
+
+	return 0;
+}
+
+static int rockchip_usb2phy_pm_resume(struct device *dev)
+{
+	return 0;
+}
+
+static const struct dev_pm_ops rockchip_usb2phy_dev_pm_ops = {
+	SET_SYSTEM_SLEEP_PM_OPS(rockchip_usb2phy_pm_suspend,
+				rockchip_usb2phy_pm_resume)
+};
+
+#define ROCKCHIP_USB2PHY_DEV_PM	(&rockchip_usb2phy_dev_pm_ops)
+#else
+#define ROCKCHIP_USB2PHY_DEV_PM	NULL
+#endif /* CONFIG_PM_SLEEP */
+
 static const struct rockchip_usb2phy_cfg rk3366_phy_cfgs[] = {
 	{
 		.reg = 0x700,
@@ -1340,6 +1460,7 @@ static const struct rockchip_usb2phy_cfg rk3399_phy_cfgs[] = {
 	{
 		.reg		= 0xe450,
 		.num_ports	= 2,
+		.phy_tuning	= rk3399_usb2phy_tuning,
 		.clkout_ctl	= { 0xe450, 4, 4, 1, 0 },
 		.port_cfgs	= {
 			[USB2PHY_PORT_OTG] = {
@@ -1353,9 +1474,13 @@ static const struct rockchip_usb2phy_cfg rk3399_phy_cfgs[] = {
 				.idrise_det_en	= { 0xe3c0, 4, 4, 0, 1 },
 				.idrise_det_st	= { 0xe3e0, 4, 4, 0, 1 },
 				.idrise_det_clr	= { 0xe3d0, 4, 4, 0, 1 },
+				.ls_det_en	= { 0xe3c0, 2, 2, 0, 1 },
+				.ls_det_st	= { 0xe3e0, 2, 2, 0, 1 },
+				.ls_det_clr	= { 0xe3d0, 2, 2, 0, 1 },
 				.utmi_avalid	= { 0xe2ac, 7, 7, 0, 1 },
 				.utmi_bvalid	= { 0xe2ac, 12, 12, 0, 1 },
 				.utmi_iddig	= { 0xe2ac, 8, 8, 0, 1 },
+				.utmi_ls	= { 0xe2ac, 14, 13, 0, 1 },
 			},
 			[USB2PHY_PORT_HOST] = {
 				.phy_sus	= { 0xe458, 1, 0, 0x2, 0x1 },
@@ -1382,6 +1507,7 @@ static const struct rockchip_usb2phy_cfg rk3399_phy_cfgs[] = {
 	{
 		.reg		= 0xe460,
 		.num_ports	= 2,
+		.phy_tuning	= rk3399_usb2phy_tuning,
 		.clkout_ctl	= { 0xe460, 4, 4, 1, 0 },
 		.port_cfgs	= {
 			[USB2PHY_PORT_OTG] = {
@@ -1395,9 +1521,13 @@ static const struct rockchip_usb2phy_cfg rk3399_phy_cfgs[] = {
 				.idrise_det_en	= { 0xe3c0, 9, 9, 0, 1 },
 				.idrise_det_st	= { 0xe3e0, 9, 9, 0, 1 },
 				.idrise_det_clr	= { 0xe3d0, 9, 9, 0, 1 },
+				.ls_det_en	= { 0xe3c0, 7, 7, 0, 1 },
+				.ls_det_st	= { 0xe3e0, 7, 7, 0, 1 },
+				.ls_det_clr	= { 0xe3d0, 7, 7, 0, 1 },
 				.utmi_avalid	= { 0xe2ac, 10, 10, 0, 1 },
 				.utmi_bvalid    = { 0xe2ac, 16, 16, 0, 1 },
 				.utmi_iddig	= { 0xe2ac, 11, 11, 0, 1 },
+				.utmi_ls	= { 0xe2ac, 18, 17, 0, 1 },
 			},
 			[USB2PHY_PORT_HOST] = {
 				.phy_sus	= { 0xe468, 1, 0, 0x2, 0x1 },
@@ -1423,6 +1553,7 @@ static struct platform_driver rockchip_usb2phy_driver = {
 	.probe		= rockchip_usb2phy_probe,
 	.driver		= {
 		.name	= "rockchip-usb2phy",
+		.pm	= ROCKCHIP_USB2PHY_DEV_PM,
 		.of_match_table = rockchip_usb2phy_dt_match,
 	},
 };

@@ -86,10 +86,6 @@ struct clk;
 #define RK3328_SOFTRST_CON(x)		((x) * 0x4 + 0x300)
 #define RK3328_MODE_CON			0x80
 #define RK3328_MISC_CON			0x84
-#define RK3328_DIV_ACLKM_MASK		0x7
-#define RK3328_DIV_ACLKM_SHIFT		4
-#define RK3328_DIV_PCLK_DBG_MASK	0xf
-#define RK3328_DIV_PCLK_DBG_SHIFT	0
 #define RK3328_SDMMC_CON0		0x380
 #define RK3328_SDMMC_CON1		0x384
 #define RK3328_SDIO_CON0		0x388
@@ -331,11 +327,17 @@ struct clk *rockchip_clk_register_inverter(const char *name,
 				void __iomem *reg, int shift, int flags,
 				spinlock_t *lock);
 
+struct clk *rockchip_clk_register_muxgrf(const char *name,
+				const char *const *parent_names, u8 num_parents,
+				int flags, struct regmap *grf, int reg,
+				int shift, int width, int mux_flags);
+
 #define PNAME(x) static const char *const x[] __initconst
 
 enum rockchip_clk_branch_type {
 	branch_composite,
 	branch_mux,
+	branch_muxgrf,
 	branch_divider,
 	branch_fraction_divider,
 	branch_gate,
@@ -554,6 +556,21 @@ struct rockchip_clk_branch {
 	{							\
 		.id		= _id,				\
 		.branch_type	= branch_mux,			\
+		.name		= cname,			\
+		.parent_names	= pnames,			\
+		.num_parents	= ARRAY_SIZE(pnames),		\
+		.flags		= f,				\
+		.muxdiv_offset	= o,				\
+		.mux_shift	= s,				\
+		.mux_width	= w,				\
+		.mux_flags	= mf,				\
+		.gate_offset	= -1,				\
+	}
+
+#define MUXGRF(_id, cname, pnames, f, o, s, w, mf)		\
+	{							\
+		.id		= _id,				\
+		.branch_type	= branch_muxgrf,		\
 		.name		= cname,			\
 		.parent_names	= pnames,			\
 		.num_parents	= ARRAY_SIZE(pnames),		\

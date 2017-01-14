@@ -34,14 +34,17 @@ struct iommu_domain;
 
 /*
  * Rockchip drm private crtc funcs.
+ * @loader_protect: protect loader logo crtc's power
  * @enable_vblank: enable crtc vblank irq.
  * @disable_vblank: disable crtc vblank irq.
  */
 struct rockchip_crtc_funcs {
+	int (*loader_protect)(struct drm_crtc *crtc, bool on);
 	int (*enable_vblank)(struct drm_crtc *crtc);
 	void (*disable_vblank)(struct drm_crtc *crtc);
 	void (*wait_for_update)(struct drm_crtc *crtc);
 	void (*cancel_pending_vblank)(struct drm_crtc *crtc, struct drm_file *file_priv);
+	int (*debugfs_dump)(struct drm_crtc *crtc, struct seq_file *s);
 };
 
 struct drm_rockchip_subdrv {
@@ -64,6 +67,10 @@ struct rockchip_atomic_commit {
 
 struct rockchip_crtc_state {
 	struct drm_crtc_state base;
+	int left_margin;
+	int right_margin;
+	int top_margin;
+	int bottom_margin;
 	int afbdc_win_format;
 	int afbdc_win_width;
 	int afbdc_win_height;
@@ -119,6 +126,8 @@ struct rockchip_drm_private {
 	unsigned int cpu_fence_context;
 	atomic_t cpu_fence_seqno;
 #endif
+	/* protect drm_mm on multi-threads */
+	struct mutex mm_lock;
 	struct drm_mm mm;
 };
 

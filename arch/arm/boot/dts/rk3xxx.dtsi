@@ -43,7 +43,7 @@
 
 #include <dt-bindings/interrupt-controller/irq.h>
 #include <dt-bindings/interrupt-controller/arm-gic.h>
-#include <dt-bindings/soc/rockchip_boot-mode.h>
+#include <dt-bindings/soc/rockchip,boot-mode.h>
 #include "skeleton.dtsi"
 
 / {
@@ -255,7 +255,7 @@
 			mode-normal = <BOOT_NORMAL>;
 			mode-recovery = <BOOT_RECOVERY>;
 			mode-bootloader = <BOOT_FASTBOOT>;
-			mode-loader = <BOOT_LOADER>;
+			mode-loader = <BOOT_BL_DOWNLOAD>;
 			mode-ums = <BOOT_UMS>;
 		};
 	};

@@ -11,11 +11,13 @@
 
 #include <linux/delay.h>
 #include <linux/extcon.h>
+#include <linux/freezer.h>
 #include <linux/gpio.h>
 #include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/of_gpio.h>
 #include <linux/regmap.h>
+#include <linux/power_supply.h>
 
 #include "fusb302.h"
 
@@ -108,9 +110,84 @@ static const unsigned int fusb302_cable[] = {
 	EXTCON_CHG_USB_CDP,
 	EXTCON_CHG_USB_DCP,
 	EXTCON_CHG_USB_SLOW,
+	EXTCON_CHG_USB_FAST,
 	EXTCON_DISP_DP,
 	EXTCON_NONE,
 };
+
+static void fusb_set_pos_power(struct fusb30x_chip *chip, int max_vol,
+			       int max_cur)
+{
+	int i;
+	int pos_find;
+	int tmp;
+
+	pos_find = 0;
+	for (i = PD_HEADER_CNT(chip->rec_head) - 1; i >= 0; i--) {
+		switch (CAP_POWER_TYPE(chip->rec_load[i])) {
+		case 0:
+			/* Fixed Supply */
+			if ((CAP_FPDO_VOLTAGE(chip->rec_load[i]) * 50) <=
+			    max_vol &&
+			    (CAP_FPDO_CURRENT(chip->rec_load[i]) * 10) <=
+			    max_cur) {
+				chip->pos_power = i + 1;
+				tmp = CAP_FPDO_VOLTAGE(chip->rec_load[i]);
+				chip->pd_output_vol = tmp * 50;
+				tmp = CAP_FPDO_CURRENT(chip->rec_load[i]);
+				chip->pd_output_cur = tmp * 10;
+				pos_find = 1;
+			}
+			break;
+		case 1:
+			/* Battery */
+			if ((CAP_VPDO_VOLTAGE(chip->rec_load[i]) * 50) <=
+			    max_vol &&
+			    (CAP_VPDO_CURRENT(chip->rec_load[i]) * 10) <=
+			    max_cur) {
+				chip->pos_power = i + 1;
+				tmp = CAP_VPDO_VOLTAGE(chip->rec_load[i]);
+				chip->pd_output_vol = tmp * 50;
+				tmp = CAP_VPDO_CURRENT(chip->rec_load[i]);
+				chip->pd_output_cur = tmp * 10;
+				pos_find = 1;
+			}
+			break;
+		default:
+			/* not meet battery caps */
+			break;
+		}
+		if (pos_find)
+			break;
+	}
+}
+
+static int fusb302_set_pos_power_by_charge_ic(struct fusb30x_chip *chip)
+{
+	struct power_supply *psy = NULL;
+	union power_supply_propval val;
+	enum power_supply_property psp;
+	int max_vol, max_cur;
+
+	max_vol = 0;
+	max_cur = 0;
+	psy = power_supply_get_by_phandle(chip->dev->of_node, "charge-dev");
+	if (!psy || IS_ERR(psy))
+		return -1;
+
+	psp = POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT_MAX;
+	if (power_supply_get_property(psy, psp, &val) == 0)
+		max_vol = val.intval / 1000;
+
+	psp = POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT;
+	if (power_supply_get_property(psy, psp, &val) == 0)
+		max_cur = val.intval / 1000;
+
+	if (max_vol > 0 && max_cur > 0)
+		fusb_set_pos_power(chip, max_vol, max_cur);
+
+	return 0;
+}
 
 void fusb_irq_disable(struct fusb30x_chip *chip)
 {
@@ -172,6 +249,32 @@ static void platform_fusb_notify(struct fusb30x_chip *chip)
 			usb_ss = 1;
 		}
 
+		if (chip->notify.power_role == 0 &&
+		    chip->notify.is_pd_connected &&
+		    chip->pd_output_vol > 0 && chip->pd_output_cur > 0) {
+			extcon_set_state(chip->extcon, EXTCON_CHG_USB_FAST,
+					 true);
+			property.intval =
+				(chip->pd_output_cur << 15 |
+				 chip->pd_output_vol);
+			extcon_set_property(chip->extcon, EXTCON_CHG_USB_FAST,
+					    EXTCON_PROP_USB_TYPEC_POLARITY,
+					    property);
+			extcon_sync(chip->extcon, EXTCON_CHG_USB_FAST);
+		}
+
+#ifdef CONFIG_FREEZER
+		/*
+		 * If system enter PM suspend, we need to wait until
+		 * PM resume all of devices completion, then the flag
+		 * pm_freezing will be set to false, and we can send
+		 * notifier to USB/DP module safety, it make sure that
+		 * USB/DP can enable power domain successfully.
+		 */
+		while (pm_freezing)
+			usleep_range(10000, 11000);
+#endif
+
 		property.intval = flip;
 		extcon_set_property(chip->extcon, EXTCON_USB,
 				    EXTCON_PROP_USB_TYPEC_POLARITY, property);
@@ -212,6 +315,9 @@ static void fusb_timer_start(struct hrtimer *timer, int ms)
 static void platform_set_vbus_lvl_enable(struct fusb30x_chip *chip, int vbus_5v,
 					 int vbus_other)
 {
+	bool gpio_vbus_value = 0;
+
+	gpio_vbus_value = gpiod_get_value(chip->gpio_vbus_5v);
 	if (chip->gpio_vbus_5v) {
 		gpiod_set_raw_value(chip->gpio_vbus_5v, vbus_5v);
 		/* Only set state here, don't sync notifier to PMIC */
@@ -219,11 +325,17 @@ static void platform_set_vbus_lvl_enable(struct fusb30x_chip *chip, int vbus_5v,
 	} else {
 		extcon_set_state(chip->extcon, EXTCON_USB_VBUS_EN, vbus_5v);
 		extcon_sync(chip->extcon, EXTCON_USB_VBUS_EN);
-		dev_info(chip->dev, "fusb302 send extcon to enable vbus 5v\n");
+		dev_info(chip->dev, "fusb302 send extcon to %s vbus 5v\n", vbus_5v ? "enable" : "disable");
 	}
 
 	if (chip->gpio_vbus_other)
 		gpiod_set_raw_value(chip->gpio_vbus_5v, vbus_other);
+
+	if (chip->gpio_discharge && !vbus_5v && gpio_vbus_value) {
+		gpiod_set_value(chip->gpio_discharge, 1);
+		msleep(20);
+		gpiod_set_value(chip->gpio_discharge, 0);
+	}
 }
 
 static void set_state(struct fusb30x_chip *chip, enum connection_state state)
@@ -274,7 +386,6 @@ static int tcpm_get_cc(struct fusb30x_chip *chip, int *CC1, int *CC2)
 
 	if (chip->cc_state & 0x04) {
 		regmap_read(chip->regmap, FUSB_REG_SWITCHES0, &store);
-
 		/* measure cc1 first */
 		regmap_update_bits(chip->regmap, FUSB_REG_SWITCHES0,
 				   SWITCHES0_MEAS_CC1 | SWITCHES0_MEAS_CC2 |
@@ -301,52 +412,56 @@ static int tcpm_get_cc(struct fusb30x_chip *chip, int *CC1, int *CC2)
 		val &= STATUS0_BC_LVL;
 		if (val)
 			*CC2 = val;
-
 		regmap_update_bits(chip->regmap, FUSB_REG_SWITCHES0,
 				   SWITCHES0_MEAS_CC1 | SWITCHES0_MEAS_CC2,
 				   store);
 	} else {
+		regmap_read(chip->regmap, FUSB_REG_SWITCHES0, &store);
+		val = store;
+		val &= ~(SWITCHES0_MEAS_CC1 | SWITCHES0_MEAS_CC2 |
+				SWITCHES0_PU_EN1 | SWITCHES0_PU_EN2);
 		if (chip->cc_state & 0x01) {
-			regmap_update_bits(chip->regmap, FUSB_REG_SWITCHES0,
-					   SWITCHES0_MEAS_CC1 |
-					   SWITCHES0_MEAS_CC2 |
-					   SWITCHES0_PU_EN1 |
-					   SWITCHES0_PU_EN2 |
-					   SWITCHES0_PDWN1 |
-					   SWITCHES0_PDWN2,
-					   SWITCHES0_MEAS_CC1 |
-					   SWITCHES0_PU_EN1);
+			val |= SWITCHES0_MEAS_CC1 | SWITCHES0_PU_EN1;
 		} else {
-			regmap_update_bits(chip->regmap, FUSB_REG_SWITCHES0,
-					   SWITCHES0_MEAS_CC1 |
-					   SWITCHES0_MEAS_CC2 |
-					   SWITCHES0_PU_EN1 |
-					   SWITCHES0_PU_EN2 |
-					   SWITCHES0_PDWN1 |
-					   SWITCHES0_PDWN2,
-					   SWITCHES0_MEAS_CC2 |
-					   SWITCHES0_PU_EN2);
+			val |= SWITCHES0_MEAS_CC2 | SWITCHES0_PU_EN2;
 		}
+		regmap_write(chip->regmap, FUSB_REG_SWITCHES0, val);
 
-		regmap_write(chip->regmap, FUSB_REG_MEASURE, 0x26 << 2);
+		regmap_write(chip->regmap, FUSB_REG_MEASURE, chip->cc_meas_high);
 		usleep_range(250, 300);
 
 		regmap_read(chip->regmap, FUSB_REG_STATUS0, &val);
-
 		if (val & STATUS0_COMP) {
-			*CC_MEASURE = TYPEC_CC_VOLT_OPEN;
+			int retry = 3;
+			int comp_times = 0;
+
+			while (retry--) {
+				regmap_write(chip->regmap, FUSB_REG_MEASURE, chip->cc_meas_high);
+				usleep_range(250, 300);
+				regmap_read(chip->regmap, FUSB_REG_STATUS0, &val);
+				if (val & STATUS0_COMP) {
+					comp_times++;
+					if (comp_times == 3) {
+						*CC_MEASURE = TYPEC_CC_VOLT_OPEN;
+						regmap_write(chip->regmap, FUSB_REG_SWITCHES0, store);
+					}
+				}
+			}
 		} else {
-			regmap_write(chip->regmap, FUSB_REG_MEASURE, 0x05 << 2);
+			regmap_write(chip->regmap, FUSB_REG_MEASURE, chip->cc_meas_low);
+			regmap_read(chip->regmap, FUSB_REG_MEASURE, &val);
 			usleep_range(250, 300);
 
 			regmap_read(chip->regmap, FUSB_REG_STATUS0, &val);
 
 			if (val & STATUS0_COMP)
-				*CC_MEASURE = TYPEC_CC_VOLT_RA;
-			else
 				*CC_MEASURE = TYPEC_CC_VOLT_RD;
+			else
+				*CC_MEASURE = TYPEC_CC_VOLT_RA;
+			regmap_write(chip->regmap, FUSB_REG_SWITCHES0, store);
 		}
 	}
+
 	return 0;
 }
 
@@ -491,6 +606,45 @@ static void fusb302_pd_reset(struct fusb30x_chip *chip)
 	regmap_reinit_cache(chip->regmap, &fusb302_regmap_config);
 }
 
+static void tcpm_select_rp_value(struct fusb30x_chip *chip, u32 rp)
+{
+	u32 control0_reg;
+
+	regmap_read(chip->regmap, FUSB_REG_CONTROL0, &control0_reg);
+
+	control0_reg &= ~CONTROL0_HOST_CUR;
+	/*
+	 * according to the host current, the compare value is different
+	*/
+	switch (rp) {
+	/* host pull up current is 80ua , high voltage is 1.596v, low is 0.21v */
+	case TYPEC_RP_USB:
+		chip->cc_meas_high = 0x26;
+		chip->cc_meas_low = 0x5;
+		control0_reg |= CONTROL0_HOST_CUR_USB;
+		break;
+	/* host pull up current is 180ua , high voltage is 1.596v, low is 0.42v */
+	case TYPEC_RP_1A5:
+		chip->cc_meas_high = 0x26;
+		chip->cc_meas_low = 0xa;
+		control0_reg |= CONTROL0_HOST_CUR_1A5;
+		break;
+	/* host pull up current is 330ua , high voltage is 2.604v, low is 0.798v*/
+	case TYPEC_RP_3A0:
+		chip->cc_meas_high = 0x26;
+		chip->cc_meas_low = 0x13;
+		control0_reg |= CONTROL0_HOST_CUR_3A0;
+		break;
+	default:
+		chip->cc_meas_high = 0x26;
+		chip->cc_meas_low = 0xa;
+		control0_reg |= CONTROL0_HOST_CUR_1A5;
+		break;
+	}
+
+	regmap_write(chip->regmap, FUSB_REG_CONTROL0, control0_reg);
+}
+
 static void tcpm_init(struct fusb30x_chip *chip)
 {
 	u8 val;
@@ -535,6 +689,8 @@ static void tcpm_init(struct fusb30x_chip *chip)
 				   CONTROL2_TOG_RD_ONLY,
 				   CONTROL2_TOG_RD_ONLY);
 #endif
+
+	tcpm_select_rp_value(chip, TYPEC_RP_1A5);
 	/* Interrupts Enable */
 	regmap_update_bits(chip->regmap, FUSB_REG_CONTROL0, CONTROL0_INT_MASK,
 			   ~CONTROL0_INT_MASK);
@@ -559,6 +715,7 @@ static void tcpc_alert(struct fusb30x_chip *chip, int *evt)
 {
 	int interrupt, interrupta, interruptb;
 	u32 val;
+	static int retry;
 
 	regmap_read(chip->regmap, FUSB_REG_INTERRUPT, &interrupt);
 	regmap_read(chip->regmap, FUSB_REG_INTERRUPTA, &interrupta);
@@ -586,7 +743,7 @@ static void tcpc_alert(struct fusb30x_chip *chip, int *evt)
 		val &= ~(SWITCHES0_PU_EN1 | SWITCHES0_PU_EN2 |
 			 SWITCHES0_PDWN1 | SWITCHES0_PDWN2);
 
-		if (chip->cc_state | 0x01)
+		if (chip->cc_state & 0x01)
 			val |= SWITCHES0_PU_EN1;
 		else
 			val |= SWITCHES0_PU_EN2;
@@ -618,9 +775,21 @@ static void tcpc_alert(struct fusb30x_chip *chip, int *evt)
 	}
 
 	if (interrupta & INTERRUPTA_HARDSENT) {
-		chip->tx_state = tx_success;
-		chip->timer_state = T_DISABLED;
-		*evt |= EVENT_TX;
+		/*
+		 * The fusb PD should be reset once to sync adapter PD
+		 * signal after fusb sent hard reset cmd.This is not PD
+		 * device if reset failed.
+		 */
+		if (!retry) {
+			retry = 1;
+			fusb302_pd_reset(chip);
+			pd_execute_hard_reset(chip);
+		} else {
+			retry = 0;
+			chip->tx_state = tx_success;
+			chip->timer_state = T_DISABLED;
+			*evt |= EVENT_TX;
+		}
 	}
 }
 
@@ -654,7 +823,11 @@ static void set_state_unattached(struct fusb30x_chip *chip)
 	memset(&chip->notify, 0, sizeof(struct notify_info));
 	platform_fusb_notify(chip);
 
+	if (chip->gpio_discharge)
+		gpiod_set_value(chip->gpio_discharge, 1);
 	msleep(100);
+	if (chip->gpio_discharge)
+		gpiod_set_value(chip->gpio_discharge, 0);
 }
 
 static int tcpm_check_vbus(struct fusb30x_chip *chip)
@@ -1297,7 +1470,8 @@ static void fusb_state_attach_wait_source(struct fusb30x_chip *chip, int evt)
 		tcpm_get_cc(chip, &cc1, &cc2);
 
 		if ((chip->cc1 == cc1) && (chip->cc2 == cc2)) {
-			chip->debounce_cnt++;
+			if (chip->debounce_cnt++ == 0)
+				platform_set_vbus_lvl_enable(chip, 1, 0);
 		} else {
 			chip->cc1 = cc1;
 			chip->cc2 = cc2;
@@ -1325,7 +1499,6 @@ static void fusb_state_attach_wait_source(struct fusb30x_chip *chip, int evt)
 static void fusb_state_attached_source(struct fusb30x_chip *chip, int evt)
 {
 	tcpm_set_polarity(chip, !(chip->cc_state & 0x01));
-	platform_set_vbus_lvl_enable(chip, 1, 0);
 	tcpm_set_vconn(chip, 1);
 
 	chip->notify.is_cc_connected = 1;
@@ -1770,6 +1943,7 @@ static void fusb_state_snk_evaluate_caps(struct fusb30x_chip *chip, int evt)
 			break;
 		}
 	}
+	fusb302_set_pos_power_by_charge_ic(chip);
 
 	if ((!chip->pos_power) || (chip->pos_power > 7)) {
 		chip->pos_power = 0;
@@ -2145,6 +2319,14 @@ static int fusb_initialize_gpio(struct fusb30x_chip *chip)
 	else
 		gpiod_set_raw_value(chip->gpio_vbus_other, 0);
 
+	chip->gpio_discharge = devm_gpiod_get_optional(chip->dev, "discharge",
+						       GPIOD_OUT_LOW);
+	if (IS_ERR(chip->gpio_discharge)) {
+		dev_warn(chip->dev,
+			 "Could not get named GPIO for discharge!\n");
+		chip->gpio_discharge = NULL;
+	}
+
 	return 0;
 }
 
@@ -2319,6 +2501,14 @@ static int fusb30x_probe(struct i2c_client *client,
 		return ret;
 	}
 
+	ret = extcon_set_property_capability(chip->extcon, EXTCON_CHG_USB_FAST,
+					     EXTCON_PROP_USB_TYPEC_POLARITY);
+	if (ret) {
+		dev_err(&client->dev,
+			"failed to set USB_PD property capability: %d\n", ret);
+		return ret;
+	}
+
 	i2c_set_clientdata(client, chip);
 
 	spin_lock_init(&chip->irq_lock);
@@ -2362,6 +2552,19 @@ static int fusb30x_remove(struct i2c_client *client)
 	return 0;
 }
 
+static void fusb30x_shutdown(struct i2c_client *client)
+{
+	struct fusb30x_chip *chip = i2c_get_clientdata(client);
+
+	if (chip->gpio_vbus_5v)
+		gpiod_set_value(chip->gpio_vbus_5v, 0);
+	if (chip->gpio_discharge) {
+		gpiod_set_value(chip->gpio_discharge, 1);
+		msleep(100);
+		gpiod_set_value(chip->gpio_discharge, 0);
+	}
+}
+
 static const struct of_device_id fusb30x_dt_match[] = {
 	{ .compatible = FUSB30X_I2C_DEVICETREE_NAME },
 	{},
@@ -2381,6 +2584,7 @@ static struct i2c_driver fusb30x_driver = {
 	},
 	.probe = fusb30x_probe,
 	.remove = fusb30x_remove,
+	.shutdown = fusb30x_shutdown,
 	.id_table = fusb30x_i2c_device_id,
 };
 

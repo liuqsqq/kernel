@@ -34,6 +34,7 @@
 #include <linux/console.h>
 #include <linux/kref.h>
 #include <linux/fdtable.h>
+#include <linux/ktime.h>
 
 #include "vcodec_iommu_ops.h"
 
@@ -46,13 +47,13 @@ struct vcodec_drm_buffer {
 	};
 	void *cpu_addr;
 	unsigned long size;
-	int fd;
 	int index;
 	struct dma_buf_attachment *attach;
 	struct sg_table *sgt;
 	struct page **pages;
 	struct kref ref;
 	struct vcodec_iommu_session_info *session_info;
+	ktime_t last_used;
 };
 
 struct vcodec_iommu_drm_info {
@@ -68,8 +69,10 @@ vcodec_drm_get_buffer_no_lock(struct vcodec_iommu_session_info *session_info,
 
 	list_for_each_entry_safe(drm_buffer, n, &session_info->buffer_list,
 				 list) {
-		if (drm_buffer->index == idx)
+		if (drm_buffer->index == idx) {
+			drm_buffer->last_used = ktime_get();
 			return drm_buffer;
+		}
 	}
 
 	return NULL;
@@ -80,12 +83,20 @@ vcodec_drm_get_buffer_fd_no_lock(struct vcodec_iommu_session_info *session_info,
 				 int fd)
 {
 	struct vcodec_drm_buffer *drm_buffer = NULL, *n;
+	struct dma_buf *dma_buf = NULL;
+
+	dma_buf = dma_buf_get(fd);
 
 	list_for_each_entry_safe(drm_buffer, n, &session_info->buffer_list,
 				 list) {
-		if (drm_buffer->fd == fd)
+		if (drm_buffer->dma_buf == dma_buf) {
+			drm_buffer->last_used = ktime_get();
+			dma_buf_put(dma_buf);
 			return drm_buffer;
+		}
 	}
+
+	dma_buf_put(dma_buf);
 
 	return NULL;
 }
@@ -243,9 +254,9 @@ static void vcdoec_drm_dump_info(struct vcodec_iommu_session_info *session_info)
 	list_for_each_entry_safe(drm_buffer, n, &session_info->buffer_list,
 				 list) {
 		vpu_iommu_debug(session_info->debug_level, DEBUG_IOMMU_OPS_DUMP,
-				"index %d drm_buffer fd %d cpu_addr %p\n",
+				"index %d drm_buffer dma_buf %p cpu_addr %p\n",
 				drm_buffer->index,
-				drm_buffer->fd, drm_buffer->cpu_addr);
+				drm_buffer->dma_buf, drm_buffer->cpu_addr);
 	}
 }
 
@@ -270,6 +281,9 @@ static int vcodec_drm_free(struct vcodec_iommu_session_info *session_info,
 		dma_buf_put(drm_buffer->dma_buf);
 		list_del_init(&drm_buffer->list);
 		kfree(drm_buffer);
+		session_info->buffer_nums--;
+		vpu_iommu_debug(session_info->debug_level, DEBUG_IOMMU_NORMAL,
+			"buffer nums %d\n", session_info->buffer_nums);
 	}
 	mutex_unlock(&session_info->list_mutex);
 
@@ -380,6 +394,9 @@ vcodec_drm_free_fd(struct vcodec_iommu_session_info *session_info, int fd)
 		dma_buf_put(drm_buffer->dma_buf);
 		list_del_init(&drm_buffer->list);
 		kfree(drm_buffer);
+		session_info->buffer_nums--;
+		vpu_iommu_debug(session_info->debug_level, DEBUG_IOMMU_NORMAL,
+			"buffer nums %d\n", session_info->buffer_nums);
 	}
 	mutex_unlock(&session_info->list_mutex);
 
@@ -426,17 +443,30 @@ static int vcodec_drm_import(struct vcodec_iommu_session_info *session_info,
 			     int fd)
 {
 	struct vcodec_drm_buffer *drm_buffer = NULL, *n;
+	struct vcodec_drm_buffer *oldest_buffer = NULL, *loop_buffer = NULL;
 	struct vcodec_iommu_info *iommu_info = session_info->iommu_info;
 	struct vcodec_iommu_drm_info *drm_info = iommu_info->private;
+	struct iommu_domain *domain = drm_info->domain;
 	struct device *dev = session_info->dev;
 	struct dma_buf_attachment *attach;
 	struct sg_table *sgt;
+	struct dma_buf *dma_buf;
+	ktime_t oldest_time = ktime_set(0, 0);
 	int ret = 0;
+
+	dma_buf = dma_buf_get(fd);
+	if (IS_ERR(dma_buf)) {
+		ret = PTR_ERR(dma_buf);
+		return ret;
+	}
 
 	list_for_each_entry_safe(drm_buffer, n,
 				 &session_info->buffer_list, list) {
-		if (drm_buffer->fd == fd)
+		if (drm_buffer->dma_buf == dma_buf) {
+			dma_buf_put(dma_buf);
+			drm_buffer->last_used = ktime_get();
 			return drm_buffer->index;
+		}
 	}
 
 	drm_buffer = kzalloc(sizeof(*drm_buffer), GFP_KERNEL);
@@ -445,14 +475,9 @@ static int vcodec_drm_import(struct vcodec_iommu_session_info *session_info,
 		return ret;
 	}
 
-	drm_buffer->dma_buf = dma_buf_get(fd);
-	if (IS_ERR(drm_buffer->dma_buf)) {
-		ret = PTR_ERR(drm_buffer->dma_buf);
-		kfree(drm_buffer);
-		return ret;
-	}
-	drm_buffer->fd = fd;
+	drm_buffer->dma_buf = dma_buf;
 	drm_buffer->session_info = session_info;
+	drm_buffer->last_used = ktime_get();
 
 	kref_init(&drm_buffer->ref);
 
@@ -484,10 +509,32 @@ static int vcodec_drm_import(struct vcodec_iommu_session_info *session_info,
 	drm_buffer->attach = attach;
 	drm_buffer->sgt = sgt;
 
+	if (!drm_info->attached)
+		iommu_detach_device(domain, dev);
+
 	mutex_unlock(&iommu_info->iommu_mutex);
 
 	INIT_LIST_HEAD(&drm_buffer->list);
 	mutex_lock(&session_info->list_mutex);
+	session_info->buffer_nums++;
+	vpu_iommu_debug(session_info->debug_level, DEBUG_IOMMU_NORMAL,
+			"buffer nums %d\n", session_info->buffer_nums);
+	if (session_info->buffer_nums > BUFFER_LIST_MAX_NUMS) {
+		list_for_each_entry_safe(loop_buffer, n,
+				 &session_info->buffer_list, list) {
+			if (ktime_to_ns(oldest_time) == 0 ||
+			    ktime_after(oldest_time,
+					loop_buffer->last_used)) {
+				oldest_time = loop_buffer->last_used;
+				oldest_buffer = loop_buffer;
+			}
+		}
+		kref_put(&oldest_buffer->ref, vcodec_drm_clear_map);
+		dma_buf_put(oldest_buffer->dma_buf);
+		list_del_init(&oldest_buffer->list);
+		kfree(oldest_buffer);
+		session_info->buffer_nums--;
+	}
 	drm_buffer->index = session_info->max_idx;
 	list_add_tail(&drm_buffer->list, &session_info->buffer_list);
 	session_info->max_idx++;

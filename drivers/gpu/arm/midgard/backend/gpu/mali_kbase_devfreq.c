@@ -1,6 +1,6 @@
 /*
  *
- * (C) COPYRIGHT 2014-2015 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2014-2016 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -14,11 +14,9 @@
  */
 
 
-#define ENABLE_DEBUG_LOG
-#include "../../platform/rk/custom_log.h"
-
 
 #include <mali_kbase.h>
+#include <mali_kbase_tlstream.h>
 #include <mali_kbase_config_defaults.h>
 #include <backend/gpu/mali_kbase_pm_internal.h>
 #ifdef CONFIG_DEVFREQ_THERMAL
@@ -108,6 +106,8 @@ kbase_devfreq_target(struct device *dev, unsigned long *target_freq, u32 flags)
 	kbdev->current_voltage = voltage;
 	kbdev->current_freq = freq;
 
+	kbase_tlstream_aux_devfreq_target((u64)freq);
+
 	kbase_pm_reset_dvfs_utilisation(kbdev);
 
 	return err;
@@ -134,6 +134,14 @@ kbase_devfreq_status(struct device *dev, struct devfreq_dev_status *stat)
 			&stat->total_time, &stat->busy_time);
 
 	stat->private_data = NULL;
+
+#ifdef CONFIG_DEVFREQ_THERMAL
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 3, 0)
+	if (kbdev->devfreq_cooling)
+		memcpy(&kbdev->devfreq_cooling->last_status, stat,
+				sizeof(*stat));
+#endif
+#endif
 
 	return 0;
 }
@@ -253,7 +261,6 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 	} else {
 		err = 0;
 	}
-	I("success initing power_model_simple.");
 #endif
 
 	return 0;

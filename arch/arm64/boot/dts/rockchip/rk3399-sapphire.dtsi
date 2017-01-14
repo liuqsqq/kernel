@@ -115,22 +115,6 @@
 		};
 	};
 
-	io-domains {
-		compatible = "rockchip,rk3399-io-voltage-domain";
-		rockchip,grf = <&grf>;
-
-		bt656-supply = <&vcc_3v0>;		/* bt656_gpio2ab_ms */
-		audio-supply = <&vcca1v8_codec>;	/* audio_gpio3d4a_ms */
-		sdmmc-supply = <&vcc_sd>;		/* sdmmc_gpio4b_ms */
-		gpio1830-supply = <&vcc_3v0>;		/* gpio1833_gpio4cd_ms */
-	};
-
-	pmu-io-domains {
-		compatible = "rockchip,rk3399-pmu-io-voltage-domain";
-		rockchip,grf = <&pmugrf>;
-		pmu1830-supply = <&vcc_3v0>;
-	};
-
 	sdio_pwrseq: sdio-pwrseq {
 		compatible = "mmc-pwrseq-simple";
 		clocks = <&rk808 1>;
@@ -163,6 +147,7 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&host_vbus_drv>;
 		regulator-name = "vcc5v0_host";
+		regulator-always-on;
 	};
 
 	vcc5v0_sys: vcc5v0-sys {
@@ -221,9 +206,6 @@
 };
 
 &emmc_phy {
-	freq-sel = <200000000>;
-	dr-sel = <50>;
-	opdelay = <4>;
 	status = "okay";
 };
 
@@ -502,6 +484,15 @@
 	status = "okay";
 };
 
+&io_domains {
+	status = "okay";
+
+	bt656-supply = <&vcc_3v0>;		/* bt656_gpio2ab_ms */
+	audio-supply = <&vcca1v8_codec>;	/* audio_gpio3d4a_ms */
+	sdmmc-supply = <&vcc_sd>;		/* sdmmc_gpio4b_ms */
+	gpio1830-supply = <&vcc_3v0>;		/* gpio1833_gpio4cd_ms */
+};
+
 &pcie0 {
 	assigned-clocks = <&cru SCLK_PCIEPHY_REF>;
 	assigned-clock-parents = <&cru SCLK_PCIEPHY_REF100M>;
@@ -511,6 +502,11 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&pcie_clkreqn>;
 	status = "okay";
+};
+
+&pmu_io_domains {
+	status = "okay";
+	pmu1830-supply = <&vcc_3v0>;
 };
 
 &pwm0 {

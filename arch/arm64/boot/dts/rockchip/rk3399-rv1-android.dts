@@ -98,22 +98,6 @@
 		};
 	};
 
-	io-domains {
-		compatible = "rockchip,rk3399-io-voltage-domain";
-		rockchip,grf = <&grf>;
-
-		bt656-supply = <&vcc1v8_s3>;
-		audio-supply = <&vcc1v8_s3>;
-		sdmmc-supply = <&vcc_sd>;
-		gpio1830-supply = <&vcc1v8_s3>;
-	};
-
-	pmu-io-domains {
-		compatible = "rockchip,rk3399-pmu-io-voltage-domain";
-		rockchip,grf = <&pmugrf>;
-		pmu1830-supply = <&vcc_1v8>;
-	};
-
 	dw_hdmi_audio: dw-hdmi-audio {
 		status = "okay";
 		compatible = "rockchip,dw-hdmi-audio";
@@ -517,6 +501,15 @@
 	};
 };
 
+&io_domains {
+	status = "okay";
+
+	bt656-supply = <&vcc1v8_s3>;
+	audio-supply = <&vcc1v8_s3>;
+	sdmmc-supply = <&vcc_sd>;
+	gpio1830-supply = <&vcc1v8_s3>;
+};
+
 &threshold {
 	temperature = <85000>; /* millicelsius */
 };
@@ -682,6 +675,11 @@
 &gpu {
 	status = "okay";
 	mali-supply = <&vdd_gpu>;
+};
+
+&pmu_io_domains {
+	status = "okay";
+	pmu1830-supply = <&vcc_1v8>;
 };
 
 &pinctrl {
