@@ -16,7 +16,6 @@
 
 
 #include <mali_kbase.h>
-#include <mali_kbase_tlstream.h>
 #include <mali_kbase_config_defaults.h>
 #include <backend/gpu/mali_kbase_pm_internal.h>
 #ifdef CONFIG_DEVFREQ_THERMAL
@@ -105,8 +104,6 @@ kbase_devfreq_target(struct device *dev, unsigned long *target_freq, u32 flags)
 	*target_freq = freq;
 	kbdev->current_voltage = voltage;
 	kbdev->current_freq = freq;
-
-	kbase_tlstream_aux_devfreq_target((u64)freq);
 
 	kbase_pm_reset_dvfs_utilisation(kbdev);
 

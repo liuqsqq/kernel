@@ -287,9 +287,10 @@
 	uboot-charge {
 		compatible = "rockchip,uboot-charge";
 		rockchip,uboot-charge-on = <1>;
-		rockchip,android-charge-on = <1>;
+		rockchip,android-charge-on = <0>;
 		rockchip,uboot-exit-charge-level = <3>;
 		rockchip,uboot-low-power-level = <1>;
+		rockchip,uboot-charge-brightness = <0>;
 	};
 
 	vibrator {
@@ -798,15 +799,15 @@
 };
 
 &pcie_phy {
-	status = "disabled";
+	status = "okay";
 };
 
 &pcie0 {
 	ep-gpios = <&gpio3 7 GPIO_ACTIVE_HIGH>;
 	num-lanes = <4>;
 	pinctrl-names = "default";
-	pinctrl-0 = <&pcie_clkreqn>;
-	status = "disabled";
+	pinctrl-0 = <&pcie_clkreqn_cpm>;
+	status = "okay";
 };
 
 &pmu_io_domains {
