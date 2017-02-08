@@ -448,11 +448,6 @@ static void scl_vop_cal_scl_fac(struct vop *vop, struct vop_win *win,
 	if (!win->phy->scl)
 		return;
 
-	if (dst_w > 3840) {
-		DRM_ERROR("Maximum destination width (3840) exceeded\n");
-		return;
-	}
-
 	if (!win->phy->scl->ext) {
 		VOP_SCL_SET(vop, win, scale_yrgb_x,
 			    scl_cal_scale2(src_w, dst_w));
@@ -758,10 +753,10 @@ static void vop_line_flag_irq_disable(struct vop *vop)
 	spin_unlock_irqrestore(&vop->irq_lock, flags);
 }
 
-static void vop_enable(struct drm_crtc *crtc)
+static void vop_power_enable(struct drm_crtc *crtc)
 {
 	struct vop *vop = to_vop(crtc);
-	int ret, i;
+	int ret;
 
 	ret = clk_prepare_enable(vop->hclk);
 	if (ret < 0) {
@@ -789,6 +784,23 @@ static void vop_enable(struct drm_crtc *crtc)
 
 	memcpy(vop->regsbak, vop->regs, vop->len);
 
+	vop->is_enabled = true;
+
+	return;
+
+err_disable_dclk:
+	clk_disable_unprepare(vop->dclk);
+err_disable_hclk:
+	clk_disable_unprepare(vop->hclk);
+}
+
+static void vop_initial(struct drm_crtc *crtc)
+{
+	struct vop *vop = to_vop(crtc);
+	int i;
+
+	vop_power_enable(crtc);
+
 	VOP_CTRL_SET(vop, global_regdone_en, 1);
 	VOP_CTRL_SET(vop, dsp_blank, 0);
 
@@ -810,29 +822,6 @@ static void vop_enable(struct drm_crtc *crtc)
 		VOP_WIN_SET(vop, win, gate, 1);
 	}
 	VOP_CTRL_SET(vop, afbdc_en, 0);
-	vop_cfg_done(vop);
-
-	vop->is_enabled = true;
-
-	spin_lock(&vop->reg_lock);
-
-	/*
-	 * enable vop, all the register would take effect when vop exit standby
-	 */
-	VOP_CTRL_SET(vop, standby, 0);
-
-	spin_unlock(&vop->reg_lock);
-
-	enable_irq(vop->irq);
-
-	drm_crtc_vblank_on(crtc);
-
-	return;
-
-err_disable_dclk:
-	clk_disable_unprepare(vop->dclk);
-err_disable_hclk:
-	clk_disable_unprepare(vop->hclk);
 }
 
 static void vop_crtc_disable(struct drm_crtc *crtc)
@@ -908,6 +897,8 @@ static int vop_plane_atomic_check(struct drm_plane *plane,
 	struct vop_win *win = to_vop_win(plane);
 	struct vop_plane_state *vop_plane_state = to_vop_plane_state(state);
 	struct drm_crtc_state *crtc_state;
+	const struct vop_data *vop_data;
+	struct vop *vop;
 	bool visible;
 	int ret;
 	struct drm_rect *dest = &vop_plane_state->dest;
@@ -959,6 +950,29 @@ static int vop_plane_atomic_check(struct drm_plane *plane,
 	vop_plane_state->format = vop_convert_format(fb->pixel_format);
 	if (vop_plane_state->format < 0)
 		return vop_plane_state->format;
+
+	vop = to_vop(crtc);
+	vop_data = vop->data;
+
+	if (drm_rect_width(src) >> 16 > vop_data->max_input_fb.width ||
+	    drm_rect_height(src) >> 16 > vop_data->max_input_fb.height) {
+		DRM_ERROR("Invalid source: %dx%d. max input: %dx%d\n",
+			  drm_rect_width(src) >> 16,
+			  drm_rect_height(src) >> 16,
+			  vop_data->max_input_fb.width,
+			  vop_data->max_input_fb.height);
+		return -EINVAL;
+	}
+
+	if (drm_rect_width(dest) >> 16 > vop_data->max_input_fb.width ||
+	    drm_rect_height(dest) >> 16 > vop_data->max_input_fb.height) {
+		DRM_ERROR("Invalid destination: %dx%d. max output: %dx%d\n",
+			  drm_rect_width(dest),
+			  drm_rect_height(dest),
+			  vop_data->max_output_fb.width,
+			  vop_data->max_output_fb.height);
+		return -EINVAL;
+	}
 
 	/*
 	 * Src.x1 can be odd when do clip, but yuv plane start point
@@ -1311,7 +1325,9 @@ static int vop_crtc_loader_protect(struct drm_crtc *crtc, bool on)
 		return 0;
 
 	if (on) {
-		vop_enable(crtc);
+		vop_power_enable(crtc);
+		enable_irq(vop->irq);
+		drm_crtc_vblank_on(crtc);
 		vop->loader_protect = true;
 	} else {
 		vop_crtc_disable(crtc);
@@ -1400,6 +1416,11 @@ static bool vop_crtc_mode_fixup(struct drm_crtc *crtc,
 				struct drm_display_mode *adjusted_mode)
 {
 	struct vop *vop = to_vop(crtc);
+	const struct vop_data *vop_data = vop->data;
+
+	if (mode->hdisplay > vop_data->max_disably_output.width ||
+	    mode->vdisplay > vop_data->max_disably_output.height)
+		return false;
 
 	adjusted_mode->clock =
 		clk_round_rate(vop->dclk, mode->clock * 1000) / 1000;
@@ -1423,50 +1444,9 @@ static void vop_crtc_enable(struct drm_crtc *crtc)
 	u16 vsync_len = adjusted_mode->crtc_vsync_end - adjusted_mode->crtc_vsync_start;
 	u16 vact_st = adjusted_mode->crtc_vtotal - adjusted_mode->crtc_vsync_start;
 	u16 vact_end = vact_st + vdisplay;
-	uint32_t version = vop->data->version;
 	uint32_t val;
 
-	vop_enable(crtc);
-	/*
-	 * If dclk rate is zero, mean that scanout is stop,
-	 * we don't need wait any more.
-	 *
-	 * Since vop version(3,4), vop timing is frame effect, not need config
-	 * timing register on vblank.
-	 */
-	if (clk_get_rate(vop->dclk) &&
-	    !(VOP_MAJOR(version) == 3 && VOP_MINOR(version) >= 4)) {
-		/*
-		 * Rk3288 vop timing register is immediately, when configure
-		 * display timing on display time, may cause tearing.
-		 *
-		 * Vop standby will take effect at end of current frame,
-		 * if dsp hold valid irq happen, it means standby complete.
-		 *
-		 * mode set:
-		 *    standby and wait complete --> |----
-		 *                                  | display time
-		 *                                  |----
-		 *                                  |---> dsp hold irq
-		 *     configure display timing --> |
-		 *         standby exit             |
-		 *                                  | new frame start.
-		 */
-
-		reinit_completion(&vop->dsp_hold_completion);
-		vop_dsp_hold_valid_irq_enable(vop);
-
-		spin_lock(&vop->reg_lock);
-
-		VOP_CTRL_SET(vop, standby, 1);
-
-		spin_unlock(&vop->reg_lock);
-
-		WARN_ON(!wait_for_completion_timeout(&vop->dsp_hold_completion,
-						     msecs_to_jiffies(50)));
-
-		vop_dsp_hold_valid_irq_disable(vop);
-	}
+	vop_initial(crtc);
 
 	val = BIT(DCLK_INVERT);
 	val |= (adjusted_mode->flags & DRM_MODE_FLAG_NHSYNC) ?
@@ -1555,7 +1535,14 @@ static void vop_crtc_enable(struct drm_crtc *crtc)
 
 	clk_set_rate(vop->dclk, adjusted_mode->clock * 1000);
 
+	vop_cfg_done(vop);
+	/*
+	 * enable vop, all the register would take effect when vop exit standby
+	 */
 	VOP_CTRL_SET(vop, standby, 0);
+
+	enable_irq(vop->irq);
+	drm_crtc_vblank_on(crtc);
 }
 
 static int vop_zpos_cmp(const void *a, const void *b)
