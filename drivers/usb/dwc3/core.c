@@ -701,6 +701,20 @@ static int dwc3_core_init(struct dwc3 *dwc)
 		break;
 	}
 
+	reg = dwc3_readl(dwc->regs, DWC3_GUCTL1);
+
+	/*
+	 * Enable hardware control of sending remote wakeup in HS when
+	 * the device is in the L1 state.
+	 */
+	if (dwc->revision >= DWC3_REVISION_290A)
+		reg |= DWC3_GUCTL1_DEV_L1_EXIT_BY_HW;
+
+	if (dwc->tx_ipgap_linecheck_dis_quirk)
+		reg |= DWC3_GUCTL1_TX_IPGAP_LINECHECK_DIS;
+
+	dwc3_writel(dwc->regs, DWC3_GUCTL1, reg);
+
 	return 0;
 
 err4:
@@ -967,6 +981,8 @@ static int dwc3_probe(struct platform_device *pdev)
 				"snps,lfps_filter_quirk");
 	dwc->rx_detect_poll_quirk = device_property_read_bool(dev,
 				"snps,rx_detect_poll_quirk");
+	dwc->dis_u3_autosuspend_quirk = device_property_read_bool(dev,
+				"snps,dis-u3-autosuspend-quirk");
 	dwc->dis_u3_susphy_quirk = device_property_read_bool(dev,
 				"snps,dis_u3_susphy_quirk");
 	dwc->dis_u2_susphy_quirk = device_property_read_bool(dev,
@@ -979,8 +995,12 @@ static int dwc3_probe(struct platform_device *pdev)
 				"snps,dis-u2-freeclk-exists-quirk");
 	dwc->dis_del_phy_power_chg_quirk = device_property_read_bool(dev,
 				"snps,dis-del-phy-power-chg-quirk");
+	dwc->tx_ipgap_linecheck_dis_quirk = device_property_read_bool(dev,
+				"snps,tx-ipgap-linecheck-dis-quirk");
 	dwc->xhci_slow_suspend_quirk = device_property_read_bool(dev,
 				"snps,xhci-slow-suspend-quirk");
+	dwc->usb3_warm_reset_on_resume_quirk = device_property_read_bool(dev,
+				"snps,usb3-warm-reset-on-resume-quirk");
 
 	dwc->tx_de_emphasis_quirk = device_property_read_bool(dev,
 				"snps,tx_de_emphasis_quirk");

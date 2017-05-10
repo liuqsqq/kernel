@@ -12,8 +12,10 @@
 #include <linux/math64.h>
 #include <linux/module.h>
 #include <linux/of_device.h>
+#include <linux/phy/phy.h>
 #include <linux/pm_runtime.h>
 #include <linux/regmap.h>
+#include <linux/reset.h>
 #include <linux/mfd/syscon.h>
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_crtc.h>
@@ -280,6 +282,8 @@ struct dw_mipi_dsi_plat_data {
 	u32 grf_dsi0_mode;
 	u32 grf_dsi0_mode_reg;
 	unsigned int max_data_lanes;
+	u32 max_bit_rate_per_lane;
+	bool has_vop_sel;
 	enum drm_mode_status (*mode_valid)(struct drm_connector *connector,
 					   struct drm_display_mode *mode);
 };
@@ -288,9 +292,11 @@ struct dw_mipi_dsi {
 	struct drm_encoder encoder;
 	struct drm_connector connector;
 	struct mipi_dsi_host dsi_host;
+	struct phy *phy;
 	struct drm_panel *panel;
 	struct device *dev;
 	struct regmap *grf_regmap;
+	struct reset_control *rst;
 	void __iomem *base;
 
 	struct clk *pllref_clk;
@@ -543,8 +549,7 @@ static int dw_mipi_dsi_host_attach(struct mipi_dsi_host *host,
 		return -EINVAL;
 	}
 
-	if (!(device->mode_flags & MIPI_DSI_MODE_VIDEO_BURST) ||
-	    !(device->mode_flags & MIPI_DSI_MODE_VIDEO_SYNC_PULSE)) {
+	if (!(device->mode_flags & MIPI_DSI_MODE_VIDEO_BURST)) {
 		dev_err(dsi->dev, "device mode is unsupported\n");
 		return -EINVAL;
 	}
@@ -832,8 +837,8 @@ static void dw_mipi_dsi_vertical_timing_config(struct dw_mipi_dsi *dsi)
 
 static void dw_mipi_dsi_dphy_timing_config(struct dw_mipi_dsi *dsi)
 {
-	dsi_write(dsi, DSI_PHY_TMR_CFG, PHY_HS2LP_TIME(0x40)
-		  | PHY_LP2HS_TIME(0x40) | MAX_RD_TIME(10000));
+	dsi_write(dsi, DSI_PHY_TMR_CFG, PHY_HS2LP_TIME(0x14)
+		  | PHY_LP2HS_TIME(0x10) | MAX_RD_TIME(10000));
 
 	dsi_write(dsi, DSI_PHY_TMR_LPCLK_CFG, PHY_CLKHS2LP_TIME(0x40)
 		  | PHY_CLKLP2HS_TIME(0x40));
@@ -885,6 +890,7 @@ static void dw_mipi_dsi_encoder_disable(struct drm_encoder *encoder)
 
 	dw_mipi_dsi_set_mode(dsi, DW_MIPI_DSI_CMD_MODE);
 	dw_mipi_dsi_disable(dsi);
+	phy_power_off(dsi->phy);
 	pm_runtime_put(dsi->dev);
 	clk_disable_unprepare(dsi->pclk);
 }
@@ -909,11 +915,29 @@ static void dw_mipi_dsi_encoder_enable(struct drm_encoder *encoder)
 		return;
 	}
 
-	ret = dw_mipi_dsi_get_lane_bps(dsi);
-	if (ret < 0)
-		return;
+	if (dsi->rst) {
+		/* MIPI DSI APB software reset request. */
+		reset_control_assert(dsi->rst);
+		udelay(10);
+		reset_control_deassert(dsi->rst);
+		udelay(10);
+	}
 
 	pm_runtime_get_sync(dsi->dev);
+
+	phy_power_on(dsi->phy);
+
+	if (dsi->phy) {
+		/*
+		 * If using the third party PHY, we get the lane
+		 * rate information from PHY.
+		 */
+		dsi->lane_mbps = phy_get_bus_width(dsi->phy);
+	} else {
+		ret = dw_mipi_dsi_get_lane_bps(dsi);
+		if (ret < 0)
+			return;
+	}
 
 	dw_mipi_dsi_init(dsi);
 	dw_mipi_dsi_dpi_config(dsi, &dsi->mode);
@@ -933,13 +957,18 @@ static void dw_mipi_dsi_encoder_enable(struct drm_encoder *encoder)
 		regmap_write(dsi->grf_regmap, pdata->grf_dsi0_mode_reg,
 			     pdata->grf_dsi0_mode);
 
-	dw_mipi_dsi_phy_init(dsi);
+	if (!dsi->phy)
+		dw_mipi_dsi_phy_init(dsi);
+
 	dw_mipi_dsi_wait_for_two_frames(dsi);
 
 	dw_mipi_dsi_set_mode(dsi, DW_MIPI_DSI_VID_MODE);
 	drm_panel_enable(dsi->panel);
 
 	clk_disable_unprepare(dsi->pclk);
+
+	if (!pdata->has_vop_sel)
+		return;
 
 	if (mux)
 		val = pdata->dsi0_en_bit | (pdata->dsi0_en_bit << 16);
@@ -1024,7 +1053,20 @@ static struct drm_encoder *dw_mipi_dsi_connector_best_encoder(
 	return &dsi->encoder;
 }
 
+static int dw_mipi_loader_protect(struct drm_connector *connector, bool on)
+{
+	struct dw_mipi_dsi *dsi = con_to_dsi(connector);
+
+	if (on)
+		pm_runtime_get_sync(dsi->dev);
+	else
+		pm_runtime_put(dsi->dev);
+
+	return 0;
+}
+
 static struct drm_connector_helper_funcs dw_mipi_dsi_connector_helper_funcs = {
+	.loader_protect = dw_mipi_loader_protect,
 	.get_modes = dw_mipi_dsi_connector_get_modes,
 	.mode_valid = dw_mipi_dsi_mode_valid,
 	.best_encoder = dw_mipi_dsi_connector_best_encoder,
@@ -1114,6 +1156,8 @@ static struct dw_mipi_dsi_plat_data rk3288_mipi_dsi_drv_data = {
 	.dsi1_en_bit = RK3288_DSI1_SEL_VOP_LIT,
 	.grf_switch_reg = RK3288_GRF_SOC_CON6,
 	.max_data_lanes = 4,
+	.max_bit_rate_per_lane = 1500000000,
+	.has_vop_sel = true,
 };
 
 static struct dw_mipi_dsi_plat_data rk3399_mipi_dsi_drv_data = {
@@ -1123,6 +1167,13 @@ static struct dw_mipi_dsi_plat_data rk3399_mipi_dsi_drv_data = {
 	.grf_dsi0_mode = RK3399_GRF_DSI_MODE,
 	.grf_dsi0_mode_reg = RK3399_GRF_SOC_CON22,
 	.max_data_lanes = 4,
+	.max_bit_rate_per_lane = 1500000000,
+	.has_vop_sel = true,
+};
+
+static struct dw_mipi_dsi_plat_data rk3368_mipi_dsi_drv_data = {
+	.max_data_lanes = 4,
+	.max_bit_rate_per_lane = 1000000000,
 };
 
 static const struct of_device_id dw_mipi_dsi_dt_ids[] = {
@@ -1132,6 +1183,9 @@ static const struct of_device_id dw_mipi_dsi_dt_ids[] = {
 	},{
 	 .compatible = "rockchip,rk3399-mipi-dsi",
 	 .data = &rk3399_mipi_dsi_drv_data,
+	}, {
+	 .compatible = "rockchip,rk3368-mipi-dsi",
+	 .data = &rk3368_mipi_dsi_drv_data,
 	},
 	{ /* sentinel */ }
 };
@@ -1153,6 +1207,13 @@ static int dw_mipi_dsi_bind(struct device *dev, struct device *master,
 	if (ret)
 		return ret;
 
+	dsi->phy = devm_phy_optional_get(dev, "mipi_dphy");
+	if (IS_ERR(dsi->phy)) {
+		ret = PTR_ERR(dsi->phy);
+		dev_err(dev, "failed to get mipi dphy: %d\n", ret);
+		return ret;
+	}
+
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!res)
 		return -ENODEV;
@@ -1161,13 +1222,6 @@ static int dw_mipi_dsi_bind(struct device *dev, struct device *master,
 	if (IS_ERR(dsi->base))
 		return PTR_ERR(dsi->base);
 
-	dsi->pllref_clk = devm_clk_get(dev, "ref");
-	if (IS_ERR(dsi->pllref_clk)) {
-		ret = PTR_ERR(dsi->pllref_clk);
-		dev_err(dev, "Unable to get pll reference clock: %d\n", ret);
-		return ret;
-	}
-
 	dsi->pclk = devm_clk_get(dev, "pclk");
 	if (IS_ERR(dsi->pclk)) {
 		ret = PTR_ERR(dsi->pclk);
@@ -1175,14 +1229,30 @@ static int dw_mipi_dsi_bind(struct device *dev, struct device *master,
 		return ret;
 	}
 
+	/* optional */
+	dsi->pllref_clk = devm_clk_get(dev, "ref");
+	if (IS_ERR(dsi->pllref_clk)) {
+		dev_info(dev, "No PHY reference clock specified\n");
+		dsi->pllref_clk = NULL;
+	}
+
+	/* optional */
 	dsi->phy_cfg_clk = devm_clk_get(dev, "phy_cfg");
-	if (IS_ERR(dsi->phy_cfg_clk))
-		dev_dbg(dev, "have not phy_cfg_clk\n");
+	if (IS_ERR(dsi->phy_cfg_clk)) {
+		dev_info(dev, "No PHY APB clock specified\n");
+		dsi->phy_cfg_clk = NULL;
+	}
 
 	ret = clk_prepare_enable(dsi->pllref_clk);
 	if (ret) {
 		dev_err(dev, "%s: Failed to enable pllref_clk\n", __func__);
 		return ret;
+	}
+
+	dsi->rst = devm_reset_control_get_optional(dev, "apb");
+	if (IS_ERR(dsi->rst)) {
+		dev_info(dev, "no reset control specified\n");
+		dsi->rst = NULL;
 	}
 
 	ret = dw_mipi_dsi_register(drm, dsi);

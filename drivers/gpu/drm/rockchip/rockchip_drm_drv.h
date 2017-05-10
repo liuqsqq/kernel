@@ -45,6 +45,9 @@ struct rockchip_crtc_funcs {
 	void (*wait_for_update)(struct drm_crtc *crtc);
 	void (*cancel_pending_vblank)(struct drm_crtc *crtc, struct drm_file *file_priv);
 	int (*debugfs_dump)(struct drm_crtc *crtc, struct seq_file *s);
+	enum drm_mode_status (*mode_valid)(struct drm_crtc *crtc,
+					   const struct drm_display_mode *mode,
+					   int output_type);
 };
 
 struct drm_rockchip_subdrv {
@@ -132,6 +135,9 @@ struct rockchip_drm_private {
 	struct drm_mm mm;
 };
 
+#ifndef MODULE
+void rockchip_free_loader_memory(struct drm_device *drm);
+#endif
 void rockchip_drm_atomic_work(struct work_struct *work);
 int rockchip_register_crtc_funcs(struct drm_crtc *crtc,
 				 const struct rockchip_crtc_funcs *crtc_funcs);

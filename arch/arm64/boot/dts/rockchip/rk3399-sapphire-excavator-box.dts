@@ -54,29 +54,7 @@
 	};
 };
 
-&rk_screen {
-	#include <dt-bindings/display/screen-timing/lcd-box.dtsi>
-};
-
-&disp_timings {
-	native-mode = <&timing1>; /* 1080p */
-};
-
-&dw_hdmi_audio {
-	status = "okay";
-};
-
-&fb {
-	rockchip,disp-mode = <NO_DUAL>;
-	rockchip,disp-policy = <DISPLAY_POLICY_BOX>;
-};
-
-&hdmi_rk_fb {
-	status = "okay";
-	rockchip,hdmi_video_source = <DISPLAY_SOURCE_LCDC0>;
-};
-
-&hdmi_sound {
+&hdmi_dp_sound {
 	status = "okay";
 };
 
@@ -85,7 +63,7 @@
 	interrupts = <GIC_SPI 61 IRQ_TYPE_LEVEL_HIGH 0>;
 	compatible = "rockchip,remotectl-pwm";
 	remote_pwm_id = <3>;
-	handle_cpu_id = <0>;
+	handle_cpu_id = <1>;
 
 	ir_key1 {
 		rockchip,usercode = <0x4040>;
@@ -179,8 +157,4 @@
 			<0xb6	KEY_0>,
 			<0xb5	KEY_BACKSPACE>;
 	};
-};
-
-&vopb_rk_fb {
-	status = "okay";
 };

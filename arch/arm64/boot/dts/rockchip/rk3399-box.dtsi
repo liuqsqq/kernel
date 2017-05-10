@@ -92,7 +92,7 @@
 
 	vdd_log: vdd-log {
 		compatible = "pwm-regulator";
-		pwms = <&pwm2 0 25000 0>;
+		pwms = <&pwm2 0 25000 1>;
 		regulator-name = "vdd_log";
 		regulator-min-microvolt = <800000>;
 		regulator-max-microvolt = <1400000>;
@@ -128,26 +128,6 @@
 	spdif_out: spdif-out {
 		status = "okay";
 		compatible = "linux,spdif-dit";
-		#sound-dai-cells = <0>;
-	};
-
-	hdmi_sound: hdmi-sound {
-		status = "disabled";
-		compatible = "simple-audio-card";
-		simple-audio-card,format = "i2s";
-		simple-audio-card,mclk-fs = <256>;
-		simple-audio-card,name = "rockchip,hdmi";
-		simple-audio-card,cpu {
-			sound-dai = <&i2s2>;
-		};
-		simple-audio-card,codec {
-			sound-dai = <&dw_hdmi_audio>;
-		};
-	};
-
-	dw_hdmi_audio: dw-hdmi-audio {
-		status = "okay";
-		compatible = "rockchip,dw-hdmi-audio";
 		#sound-dai-cells = <0>;
 	};
 
@@ -195,6 +175,10 @@
 	test-power {
 		status = "okay";
 	};
+};
+
+&hdmi_dp_sound {
+	status = "okay";
 };
 
 &sdmmc {
@@ -525,10 +509,6 @@
 	mali-supply = <&vdd_gpu>;
 };
 
-&rga {
-	status = "okay";
-};
-
 &threshold {
 	temperature = <85000>;
 };
@@ -641,7 +621,7 @@
 	interrupts = <GIC_SPI 61 IRQ_TYPE_LEVEL_HIGH 0>;
 	compatible = "rockchip,remotectl-pwm";
 	remote_pwm_id = <3>;
-	handle_cpu_id = <0>;
+	handle_cpu_id = <1>;
 
 	ir_key1 {
 		rockchip,usercode = <0x4040>;
@@ -692,6 +672,7 @@
 			<0xa5	KEY_VOLUMEDOWN>,
 			<0xab	183>,
 			<0xb7	388>,
+			<0xe8	388>,
 			<0xf8	184>,
 			<0xaf	185>,
 			<0xed	KEY_VOLUMEDOWN>,
@@ -756,46 +737,6 @@
 
 &saradc {
 	status = "okay";
-};
-
-&rk_screen {
-	#include <dt-bindings/display/screen-timing/lcd-box.dtsi>
-};
-
-&disp_timings {
-	native-mode = <&timing1>; /* 1080p */
-};
-
-&vopb_rk_fb {
-	status = "okay";
-};
-
-&vopl_rk_fb {
-	status = "okay";
-};
-
-&fb {
-	rockchip,disp-policy = <DISPLAY_POLICY_BOX>;
-};
-
-&hdmi_rk_fb {
-	status = "okay";
-	rockchip,hdmi_video_source = <DISPLAY_SOURCE_LCDC0>;
-	rockchip,phy_table =
-		<165000000 0 0 17 18 18 18>,
-		<340000000 0 2 17 14 14 14>,
-		<594000000 0 2 17  9  9  9>;
-};
-
-&cdn_dp_sound {
-	status = "okay";
-};
-
-&cdn_dp_fb {
-	status = "okay";
-	extcon = <&fusb0>;
-	phys = <&tcphy0_dp>;
-	dp_vop_sel = <DISPLAY_SOURCE_LCDC1>;
 };
 
 &i2s2 {
@@ -871,3 +812,41 @@
 	pmu1830-supply = <&vcc_1v8>;
 };
 
+&rockchip_suspend {
+	status = "okay";
+	rockchip,sleep-debug-en = <0>;
+	rockchip,sleep-mode-config = <
+		(0
+		| RKPM_SLP_ARMPD
+		| RKPM_SLP_PERILPPD
+		| RKPM_SLP_DDR_RET
+		| RKPM_SLP_PLLPD
+		| RKPM_SLP_CENTER_PD
+		| RKPM_SLP_AP_PWROFF
+		)
+	>;
+	rockchip,wakeup-config = <
+		(0
+		| RKPM_GPIO_WKUP_EN
+		| RKPM_PWM_WKUP_EN
+		)
+	>;
+	rockchip,pwm-regulator-config = <
+		(0
+		| PWM2_REGULATOR_EN
+		)
+	>;
+	rockchip,power-ctrl =
+		<&gpio1 17 GPIO_ACTIVE_HIGH>,
+		<&gpio1 14 GPIO_ACTIVE_HIGH>;
+};
+
+&vopb {
+	assigned-clocks = <&cru DCLK_VOP0_DIV>;
+	assigned-clock-parents = <&cru PLL_VPLL>;
+};
+
+&vopl {
+	assigned-clocks = <&cru DCLK_VOP1_DIV>;
+	assigned-clock-parents = <&cru PLL_CPLL>;
+};

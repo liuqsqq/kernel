@@ -92,6 +92,7 @@ struct vop_ctrl {
 	struct vop_reg dsp_layer_sel;
 	struct vop_reg overlay_mode;
 	struct vop_reg core_dclk_div;
+	struct vop_reg dclk_ddr;
 	struct vop_reg p2i_en;
 	struct vop_reg rgb_en;
 	struct vop_reg edp_en;
@@ -108,6 +109,7 @@ struct vop_ctrl {
 	struct vop_reg dither_up;
 	struct vop_reg dither_down;
 
+	struct vop_reg dsp_out_yuv;
 	struct vop_reg dsp_data_swap;
 	struct vop_reg dsp_ccir656_avg;
 	struct vop_reg dsp_black;
@@ -208,6 +210,11 @@ enum {
 	VOP_CSC_R2R_BT709_TO_2020,
 };
 
+enum _vop_overlay_mode {
+	VOP_RGB_DOMAIN,
+	VOP_YUV_DOMAIN
+};
+
 struct vop_win_phy {
 	const struct vop_scl_regs *scl;
 	const uint32_t *data_formats;
@@ -228,6 +235,7 @@ struct vop_win_phy {
 	struct vop_reg yrgb_vir;
 	struct vop_reg uv_vir;
 
+	struct vop_reg channel;
 	struct vop_reg dst_alpha_ctl;
 	struct vop_reg src_alpha_ctl;
 	struct vop_reg alpha_mode;
@@ -262,9 +270,8 @@ struct vop_data {
 	const struct vop_csc_table *csc_table;
 	unsigned int win_size;
 	uint32_t version;
-	struct vop_rect max_input_fb;
-	struct vop_rect max_output_fb;
-	struct vop_rect max_disably_output;
+	struct vop_rect max_input;
+	struct vop_rect max_output;
 	u64 feature;
 };
 
@@ -324,11 +331,12 @@ struct vop_data {
 /*
  * display output interface supported by rockchip lcdc
  */
-#define ROCKCHIP_OUT_MODE_P888	0
-#define ROCKCHIP_OUT_MODE_P666	1
-#define ROCKCHIP_OUT_MODE_P565	2
+#define ROCKCHIP_OUT_MODE_P888		0
+#define ROCKCHIP_OUT_MODE_P666		1
+#define ROCKCHIP_OUT_MODE_P565		2
+#define ROCKCHIP_OUT_MODE_YUV420	14
 /* for use special outface */
-#define ROCKCHIP_OUT_MODE_AAAA	15
+#define ROCKCHIP_OUT_MODE_AAAA		15
 
 #define ROCKCHIP_OUT_MODE_TYPE(x)	((x) >> 16)
 #define ROCKCHIP_OUT_MODE(x)		((x) & 0xffff)
@@ -437,6 +445,9 @@ static inline uint16_t scl_get_bili_dn_vskip(int src_h, int dst_h,
 	int act_height;
 
 	act_height = (src_h + vskiplines - 1) / vskiplines;
+
+	if (act_height == dst_h)
+		return GET_SCL_FT_BILI_DN(src_h, dst_h) / vskiplines;
 
 	return GET_SCL_FT_BILI_DN(act_height, dst_h);
 }

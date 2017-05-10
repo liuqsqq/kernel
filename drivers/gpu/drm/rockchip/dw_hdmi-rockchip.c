@@ -12,6 +12,7 @@
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
+#include <linux/pm_runtime.h>
 
 #include <drm/drm_of.h>
 #include <drm/drmP.h>
@@ -40,56 +41,6 @@ struct rockchip_hdmi {
 };
 
 #define to_rockchip_hdmi(x)	container_of(x, struct rockchip_hdmi, x)
-
-#define CLK_SLOP(clk)		((clk) / 1000)
-#define CLK_PLUS_SLOP(clk)	((clk) + CLK_SLOP(clk))
-
-static const int dw_hdmi_rates[] = {
-	25176471,	/* for 25.175 MHz, 0.006% off */
-	25200000,
-	27000000,
-	28320000,
-	30240000,
-	31500000,
-	32000000,
-	33750000,
-	36000000,
-	40000000,
-	49500000,
-	50000000,
-	54000000,
-	57290323,	/* for 57.284 MHz, .011 % off */
-	65000000,
-	68250000,
-	71000000,
-	72000000,
-	73250000,
-	74250000,
-	74437500,	/* for 74.44 MHz, .003% off */
-	75000000,
-	78750000,
-	78800000,
-	79500000,
-	83500000,
-	85500000,
-	88750000,
-	97750000,
-	101000000,
-	106500000,
-	108000000,
-	115500000,
-	118666667,	/* for 118.68 MHz, .011% off */
-	119000000,
-	121714286,	/* for 121.75 MHz, .029% off */
-	135000000,
-	136800000,	/* for 136.75 MHz, .037% off */
-	146250000,
-	148500000,
-	154000000,
-	162000000,
-	297000000,
-	594000000,
-};
 
 /*
  * There are some rates that would be ranged for better clock jitter at
@@ -213,18 +164,44 @@ static const struct dw_hdmi_curr_ctrl rockchip_cur_ctr[] = {
 	}
 };
 
-static const struct dw_hdmi_phy_config rockchip_phy_config[] = {
+static struct dw_hdmi_phy_config rockchip_phy_config[] = {
 	/*pixelclk   symbol   term   vlev*/
 	{ 74250000,  0x8009, 0x0004, 0x0272},
 	{ 165000000, 0x802b, 0x0004, 0x0209},
 	{ 297000000, 0x8039, 0x0005, 0x028d},
+	{ 594000000, 0x8039, 0x0000, 0x019d},
 	{ ~0UL,	     0x0000, 0x0000, 0x0000}
 };
+
+static int rockchip_hdmi_update_phy_table(struct rockchip_hdmi *hdmi,
+					  u32 *config,
+					  int phy_table_size)
+{
+	int i;
+
+	if (phy_table_size > ARRAY_SIZE(rockchip_phy_config)) {
+		dev_err(hdmi->dev, "phy table array number is out of range\n");
+		return -E2BIG;
+	}
+
+	for (i = 0; i < phy_table_size; i++) {
+		if (config[i * 4] != 0)
+			rockchip_phy_config[i].mpixelclock = (u64)config[i * 4];
+		else
+			rockchip_phy_config[i].mpixelclock = ~0UL;
+		rockchip_phy_config[i].term = (u16)config[i * 4 + 1];
+		rockchip_phy_config[i].sym_ctr = (u16)config[i * 4 + 2];
+		rockchip_phy_config[i].vlev_ctr = (u16)config[i * 4 + 3];
+	}
+
+	return 0;
+}
 
 static int rockchip_hdmi_parse_dt(struct rockchip_hdmi *hdmi)
 {
 	struct device_node *np = hdmi->dev->of_node;
-	int ret;
+	int ret, val, phy_table_size;
+	u32 *phy_config;
 
 	hdmi->regmap = syscon_regmap_lookup_by_phandle(np, "rockchip,grf");
 	if (IS_ERR(hdmi->regmap)) {
@@ -258,6 +235,28 @@ static int rockchip_hdmi_parse_dt(struct rockchip_hdmi *hdmi)
 		return ret;
 	}
 
+	if (of_get_property(np, "rockchip,phy-table", &val)) {
+		phy_config = kmalloc(val, GFP_KERNEL);
+		if (!phy_config) {
+			/* use default table when kmalloc failed. */
+			dev_err(hdmi->dev, "kmalloc phy table failed\n");
+
+			return -ENOMEM;
+		}
+		phy_table_size = val / 16;
+		of_property_read_u32_array(np, "rockchip,phy-table",
+					   phy_config, val / sizeof(u32));
+		ret = rockchip_hdmi_update_phy_table(hdmi, phy_config,
+						     phy_table_size);
+		if (ret) {
+			kfree(phy_config);
+			return ret;
+		}
+		kfree(phy_config);
+	} else {
+		dev_dbg(hdmi->dev, "use default hdmi phy table\n");
+	}
+
 	return 0;
 }
 
@@ -265,9 +264,11 @@ static enum drm_mode_status
 dw_hdmi_rockchip_mode_valid(struct drm_connector *connector,
 			    struct drm_display_mode *mode)
 {
-	int pclk = mode->clock * 1000;
-	int num_rates = ARRAY_SIZE(dw_hdmi_rates);
-	int i;
+	struct drm_encoder *encoder = connector->encoder;
+	enum drm_mode_status status = MODE_OK;
+	struct drm_device *dev = connector->dev;
+	struct rockchip_drm_private *priv = dev->dev_private;
+	struct drm_crtc *crtc;
 
 	/*
 	 * Pixel clocks we support are always < 2GHz and so fit in an
@@ -277,15 +278,41 @@ dw_hdmi_rockchip_mode_valid(struct drm_connector *connector,
 	if (mode->clock > INT_MAX / 1000)
 		return MODE_BAD;
 
-	for (i = 0; i < num_rates; i++) {
-		int slop = CLK_SLOP(pclk);
+	if (!encoder) {
+		const struct drm_connector_helper_funcs *funcs;
 
-		if ((pclk >= dw_hdmi_rates[i] - slop) &&
-		    (pclk <= dw_hdmi_rates[i] + slop))
-			return MODE_OK;
+		funcs = connector->helper_private;
+		if (funcs->atomic_best_encoder)
+			encoder = funcs->atomic_best_encoder(connector,
+							     connector->state);
+		else
+			encoder = funcs->best_encoder(connector);
 	}
 
-	return MODE_BAD;
+	if (!encoder || !encoder->possible_crtcs)
+		return MODE_BAD;
+	/*
+	 * ensure all drm display mode can work, if someone want support more
+	 * resolutions, please limit the possible_crtc, only connect to
+	 * needed crtc.
+	 */
+	drm_for_each_crtc(crtc, connector->dev) {
+		int pipe = drm_crtc_index(crtc);
+		const struct rockchip_crtc_funcs *funcs =
+						priv->crtc_funcs[pipe];
+
+		if (!(encoder->possible_crtcs & drm_crtc_mask(crtc)))
+			continue;
+		if (!funcs || !funcs->mode_valid)
+			continue;
+
+		status = funcs->mode_valid(crtc, mode,
+					   DRM_MODE_CONNECTOR_HDMIA);
+		if (status != MODE_OK)
+			return status;
+	}
+
+	return status;
 }
 
 static const struct drm_encoder_funcs dw_hdmi_rockchip_encoder_funcs = {
@@ -296,62 +323,20 @@ static void dw_hdmi_rockchip_encoder_disable(struct drm_encoder *encoder)
 {
 }
 
-static bool
-dw_hdmi_rockchip_encoder_mode_fixup(struct drm_encoder *encoder,
-				    const struct drm_display_mode *mode,
-				    struct drm_display_mode *adj_mode)
-{
-	struct rockchip_hdmi *hdmi = to_rockchip_hdmi(encoder);
-	int pclk = adj_mode->clock * 1000;
-	int best_diff = INT_MAX;
-	int best_clock = 0;
-	int slop;
-	int i;
-
-	/* Pick the best clock */
-	for (i = 0; i < ARRAY_SIZE(dw_hdmi_rates); i++) {
-		int diff = dw_hdmi_rates[i] - pclk;
-
-		if (diff < 0)
-			diff = -diff;
-		if (diff < best_diff) {
-			best_diff = diff;
-			best_clock = dw_hdmi_rates[i];
-
-			/* Bail early if we're exact */
-			if (best_diff == 0)
-				return true;
-		}
-	}
-
-	/* Double check that it's OK */
-	slop = CLK_SLOP(pclk);
-	if ((pclk >= best_clock - slop) && (pclk <= best_clock + slop)) {
-		adj_mode->clock = DIV_ROUND_UP(best_clock, 1000);
-		return true;
-	}
-
-	/* Shoudn't be here; we should have said rate wasn't valid */
-	dev_warn(hdmi->dev, "tried to set invalid rate %d\n", adj_mode->clock);
-	return false;
-}
-
-static void dw_hdmi_rockchip_encoder_mode_set(struct drm_encoder *encoder,
-					      struct drm_display_mode *mode,
-					      struct drm_display_mode *adj_mode)
-{
-	struct rockchip_hdmi *hdmi = to_rockchip_hdmi(encoder);
-
-	clk_set_rate(hdmi->vpll_clk, adj_mode->clock * 1000);
-}
-
 static void dw_hdmi_rockchip_encoder_enable(struct drm_encoder *encoder)
 {
 	struct rockchip_hdmi *hdmi = to_rockchip_hdmi(encoder);
+	struct drm_crtc *crtc = encoder->crtc;
 	u32 lcdsel_grf_reg, lcdsel_mask;
 	u32 val;
 	int mux;
 	int ret;
+
+	if (WARN_ON(!crtc || !crtc->state))
+		return;
+
+	clk_set_rate(hdmi->vpll_clk,
+		     crtc->state->adjusted_mode.crtc_clock * 1000);
 
 	switch (hdmi->dev_type) {
 	case RK3288_HDMI:
@@ -392,16 +377,19 @@ dw_hdmi_rockchip_encoder_atomic_check(struct drm_encoder *encoder,
 {
 	struct rockchip_crtc_state *s = to_rockchip_crtc_state(crtc_state);
 
-	s->output_mode = ROCKCHIP_OUT_MODE_AAAA;
+	if (crtc_state->mode.flags & DRM_MODE_FLAG_420_MASK) {
+		s->output_mode = ROCKCHIP_OUT_MODE_YUV420;
+		s->bus_format = MEDIA_BUS_FMT_YUV8_1X24;
+	} else {
+		s->output_mode = ROCKCHIP_OUT_MODE_AAAA;
+		s->bus_format = MEDIA_BUS_FMT_RGB888_1X24;
+	}
 	s->output_type = DRM_MODE_CONNECTOR_HDMIA;
-	s->bus_format = MEDIA_BUS_FMT_RGB888_1X24;
 
 	return 0;
 }
 
 static const struct drm_encoder_helper_funcs dw_hdmi_rockchip_encoder_helper_funcs = {
-	.mode_fixup = dw_hdmi_rockchip_encoder_mode_fixup,
-	.mode_set   = dw_hdmi_rockchip_encoder_mode_set,
 	.enable     = dw_hdmi_rockchip_encoder_enable,
 	.disable    = dw_hdmi_rockchip_encoder_disable,
 	.atomic_check = dw_hdmi_rockchip_encoder_atomic_check,
@@ -416,6 +404,14 @@ static const struct dw_hdmi_plat_data rk3288_hdmi_drv_data = {
 	.tmds_n_table = rockchip_werid_tmds_n_table,
 };
 
+static const struct dw_hdmi_plat_data rk3368_hdmi_drv_data = {
+	.mode_valid = dw_hdmi_rockchip_mode_valid,
+	.mpll_cfg   = rockchip_mpll_cfg,
+	.cur_ctr    = rockchip_cur_ctr,
+	.phy_config = rockchip_phy_config,
+	.dev_type   = RK3368_HDMI,
+};
+
 static const struct dw_hdmi_plat_data rk3399_hdmi_drv_data = {
 	.mode_valid = dw_hdmi_rockchip_mode_valid,
 	.mpll_cfg   = rockchip_mpll_cfg,
@@ -427,6 +423,10 @@ static const struct dw_hdmi_plat_data rk3399_hdmi_drv_data = {
 static const struct of_device_id dw_hdmi_rockchip_dt_ids[] = {
 	{ .compatible = "rockchip,rk3288-dw-hdmi",
 	  .data = &rk3288_hdmi_drv_data
+	},
+	{
+	 .compatible = "rockchip,rk3368-dw-hdmi",
+	 .data = &rk3368_hdmi_drv_data
 	},
 	{ .compatible = "rockchip,rk3399-dw-hdmi",
 	  .data = &rk3399_hdmi_drv_data
@@ -514,15 +514,40 @@ static const struct component_ops dw_hdmi_rockchip_ops = {
 
 static int dw_hdmi_rockchip_probe(struct platform_device *pdev)
 {
+	pm_runtime_enable(&pdev->dev);
+	pm_runtime_get_sync(&pdev->dev);
+
 	return component_add(&pdev->dev, &dw_hdmi_rockchip_ops);
 }
 
 static int dw_hdmi_rockchip_remove(struct platform_device *pdev)
 {
 	component_del(&pdev->dev, &dw_hdmi_rockchip_ops);
+	pm_runtime_disable(&pdev->dev);
 
 	return 0;
 }
+
+static int dw_hdmi_rockchip_suspend(struct device *dev)
+{
+	dw_hdmi_suspend(dev);
+	pm_runtime_put_sync(dev);
+
+	return 0;
+}
+
+static int dw_hdmi_rockchip_resume(struct device *dev)
+{
+	pm_runtime_get_sync(dev);
+	dw_hdmi_resume(dev);
+
+	return  0;
+}
+
+static const struct dev_pm_ops dw_hdmi_pm_ops = {
+	SET_SYSTEM_SLEEP_PM_OPS(dw_hdmi_rockchip_suspend,
+				dw_hdmi_rockchip_resume)
+};
 
 static struct platform_driver dw_hdmi_rockchip_pltfm_driver = {
 	.probe  = dw_hdmi_rockchip_probe,
@@ -530,6 +555,7 @@ static struct platform_driver dw_hdmi_rockchip_pltfm_driver = {
 	.driver = {
 		.name = "dwhdmi-rockchip",
 		.of_match_table = dw_hdmi_rockchip_dt_ids,
+		.pm = &dw_hdmi_pm_ops,
 	},
 };
 

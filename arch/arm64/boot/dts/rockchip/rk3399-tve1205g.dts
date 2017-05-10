@@ -43,7 +43,7 @@
 /dts-v1/;
 #include <dt-bindings/pinctrl/rk.h>
 #include "rk3399.dtsi"
-#include "rk3399-android-next.dtsi"
+#include "rk3399-android.dtsi"
 #include "rk3399-opp.dtsi"
 #include <dt-bindings/sensor-dev.h>
 #include <dt-bindings/pwm/pwm.h>
@@ -52,7 +52,7 @@
 	compatible = "rockchip,rk3399-mid", "rockchip,rk3399";
 
 	edp_panel: edp-panel {
-		compatible = "simple-panel";
+		compatible = "auo,b125han03";
 		backlight = <&backlight>;
 		power-supply = <&vcc3v3_s0>;
 		enable-gpios = <&gpio3 GPIO_A0 GPIO_ACTIVE_HIGH>;
@@ -104,7 +104,7 @@
 
 	vdd_log: vdd-log {
 		compatible = "pwm-regulator";
-		pwms = <&pwm2 0 25000 0>;
+		pwms = <&pwm2 0 25000 1>;
 		rockchip,pwm_id= <2>;
 		rockchip,pwm_voltage = <1000000>;
 		regulator-name = "vdd_log";
@@ -184,19 +184,29 @@
 		};
 	};
 
-	spdif-sound {
+	sound {
+		compatible = "rockchip,cdndp-sound";
+		rockchip,cpu = <&i2s2>;
+		rockchip,codec = <&cdn_dp>;
+		status = "okay";
+	};
+
+	bt-sound {
 		compatible = "simple-audio-card";
-		simple-audio-card,name = "rockchip,spdif";
+		simple-audio-card,format = "dsp_b";
+		simple-audio-card,bitclock-inversion = <1>;
+		simple-audio-card,mclk-fs = <256>;
+		simple-audio-card,name = "rockchip,bt";
 		simple-audio-card,cpu {
-			sound-dai = <&spdif>;
+			sound-dai = <&i2s1>;
 		};
 		simple-audio-card,codec {
-			sound-dai = <&spdif_out>;
+			sound-dai = <&bt_sco>;
 		};
 	};
 
-	spdif_out: spdif-out {
-		compatible = "linux,spdif-dit";
+	bt_sco: bt-sco {
+		compatible = "delta,dfbmcs320";
 		#sound-dai-cells = <0>;
 	};
 
@@ -288,9 +298,11 @@
 		compatible = "rockchip,uboot-charge";
 		rockchip,uboot-charge-on = <1>;
 		rockchip,android-charge-on = <0>;
-		rockchip,uboot-exit-charge-level = <3>;
+		rockchip,uboot-exit-charge-level = <2>;
 		rockchip,uboot-low-power-level = <1>;
 		rockchip,uboot-charge-brightness = <0>;
+		max-input-voltage = <20000>;
+		max-input-current = <6000>;
 	};
 
 	vibrator {
@@ -407,6 +419,10 @@
 	};
 };
 
+&edp_in_vopl {
+	status = "disabled";
+};
+
 &emmc_phy {
 	status = "okay";
 };
@@ -420,6 +436,15 @@
 	status = "disabled";
 };
 
+&cdn_dp {
+	status = "okay";
+	extcon = <&fusb0>, <&fusb1>;
+};
+
+&dp_in_vopb {
+	status = "disabled";
+};
+
 &i2s0 {
 	status = "okay";
 	rockchip,i2s-broken-burst-len;
@@ -429,7 +454,16 @@
 	#sound-dai-cells = <0>;
 };
 
+&i2s1 {
+	status = "okay";
+	rockchip,i2s-broken-burst-len;
+	rockchip,playback-channels = <2>;
+	rockchip,capture-channels = <2>;
+	#sound-dai-cells = <0>;
+};
+
 &i2s2 {
+	status = "okay";
 	#sound-dai-cells = <0>;
 };
 
@@ -600,8 +634,7 @@
 				regulator-max-microvolt = <3000000>;
 				regulator-name = "vcca3v0_codec";
 				regulator-state-mem {
-					regulator-on-in-suspend;
-					regulator-suspend-microvolt = <3000000>;
+					regulator-off-in-suspend;
 				};
 			};
 
@@ -624,8 +657,7 @@
 				regulator-max-microvolt = <1800000>;
 				regulator-name = "vcca1v8_codec";
 				regulator-state-mem {
-					regulator-on-in-suspend;
-					regulator-suspend-microvolt = <1800000>;
+					regulator-off-in-suspend;
 				};
 			};
 
@@ -763,6 +795,8 @@
 		int-n-gpios = <&gpio1 GPIO_B5 GPIO_ACTIVE_HIGH>;
 		discharge-gpios = <&gpio0 GPIO_B5 GPIO_ACTIVE_HIGH>;
 		charge-dev = <&bq25700>;
+		support-uboot-charge = <1>;
+		port-num = <1>;
 		status = "okay";
 	};
 };
@@ -782,6 +816,8 @@
 		int-n-gpios = <&gpio1 GPIO_A2 GPIO_ACTIVE_HIGH>;
 		discharge-gpios = <&gpio0 GPIO_B4 GPIO_ACTIVE_HIGH>;
 		charge-dev = <&bq25700>;
+		support-uboot-charge = <1>;
+		port-num = <0>;
 		status = "okay";
 	};
 };
@@ -823,17 +859,9 @@
 	status = "okay";
 };
 
-&rkvdec {
-	status = "okay";
-};
-
 &route_edp {
 	status = "okay";
 	logo,mode = "center";
-};
-
-&rga {
-	status = "okay";
 };
 
 &saradc {
@@ -981,8 +1009,33 @@
 	status = "okay";
 };
 
-&vpu {
+&rockchip_suspend {
 	status = "okay";
+	rockchip,sleep-debug-en = <1>;
+	rockchip,sleep-mode-config = <
+		(0
+		| RKPM_SLP_ARMPD
+		| RKPM_SLP_PERILPPD
+		| RKPM_SLP_DDR_RET
+		| RKPM_SLP_PLLPD
+		| RKPM_SLP_CENTER_PD
+		| RKPM_SLP_AP_PWROFF
+		)
+		>;
+		rockchip,wakeup-config = <
+		(0
+		| RKPM_GPIO_WKUP_EN
+		| RKPM_PWM_WKUP_EN
+		)
+		>;
+		rockchip,pwm-regulator-config = <
+		(0
+		| PWM2_REGULATOR_EN
+		)
+		>;
+		rockchip,power-ctrl =
+		<&gpio1 17 GPIO_ACTIVE_HIGH>,
+		<&gpio1 14 GPIO_ACTIVE_HIGH>;
 };
 
 &pinctrl {
@@ -1021,7 +1074,7 @@
 
 	hallsensor {
 		mh248_irq_gpio: mh248-irq-gpio {
-			rockchip,pins = <0 GPIO_A2 RK_FUNC_GPIO &pcfg_pull_up>;
+			rockchip,pins = <0 GPIO_A1 RK_FUNC_GPIO &pcfg_pull_up>;
 		};
 	};
 

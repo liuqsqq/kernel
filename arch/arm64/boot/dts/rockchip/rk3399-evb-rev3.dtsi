@@ -41,6 +41,7 @@
  */
 
 #include "rk3399-evb.dtsi"
+#include <dt-bindings/suspend/rockchip-rk3399.h>
 
 / {
 	compatible = "rockchip,rk3399-evb-rev3", "rockchip,rk3399";
@@ -58,12 +59,30 @@
 		compatible = "pwm-regulator";
 		rockchip,pwm_id = <2>;
 		rockchip,pwm_voltage = <900000>;
-		pwms = <&pwm2 0 25000 0>;
+		pwms = <&pwm2 0 25000 1>;
 		regulator-name = "vdd_center";
 		regulator-min-microvolt = <800000>;
 		regulator-max-microvolt = <1400000>;
 		regulator-always-on;
 		regulator-boot-on;
+	};
+
+	rockchip_suspend: rockchip-suspend {
+		compatible = "rockchip,pm-rk3399";
+		status = "okay";
+		rockchip,sleep-debug-en = <1>;
+		rockchip,wakeup-config = <
+			(0
+			| RKPM_GPIO_WKUP_EN
+			)
+		>;
+		rockchip,pwm-regulator-config = <
+			(0
+			| PWM2_REGULATOR_EN
+			)
+		>;
+		rockchip,power-ctrl =
+			<&gpio1 17 GPIO_ACTIVE_HIGH>;
 	};
 };
 

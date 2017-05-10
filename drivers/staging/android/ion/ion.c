@@ -44,6 +44,7 @@
 /**
  * struct ion_device - the metadata of the ion device node
  * @dev:		the actual misc device
+ * @pdev:		the device from platform
  * @buffers:		an rb tree of all the existing buffers
  * @buffer_lock:	lock protecting the tree of buffers
  * @lock:		rwsem protecting the tree of heaps and clients
@@ -52,6 +53,7 @@
  */
 struct ion_device {
 	struct miscdevice dev;
+	struct device *pdev;
 	struct rb_root buffers;
 	struct mutex buffer_lock;
 	struct rw_semaphore lock;
@@ -1176,15 +1178,66 @@ static struct sg_table *ion_map_dma_buf(struct dma_buf_attachment *attachment,
 {
 	struct dma_buf *dmabuf = attachment->dmabuf;
 	struct ion_buffer *buffer = dmabuf->priv;
+	int nr_pages = PAGE_ALIGN(buffer->size) / PAGE_SIZE;
+	struct sg_table *table = buffer->sg_table;
+	struct scatterlist *sg;
+	struct sg_table *sgt;
+	int ret, i;
 
 	ion_buffer_sync_for_device(buffer, attachment->dev, direction);
-	return buffer->sg_table;
+	sgt = kmalloc(sizeof(*sgt), GFP_KERNEL);
+	if (!sgt)
+		return ERR_PTR(-ENOMEM);
+
+	if (!buffer->pages) {
+		int j, k = 0;
+
+		buffer->pages = vmalloc(sizeof(struct page *) * nr_pages);
+		if (!buffer->pages) {
+			ret = -ENOMEM;
+			goto err_free_sgt;
+		}
+
+		for_each_sg(table->sgl, sg, table->nents, i) {
+			struct page *page = sg_page(sg);
+
+			for (j = 0; j < sg->length / PAGE_SIZE; j++)
+				buffer->pages[k++] = page++;
+		}
+	}
+
+	ret = sg_alloc_table_from_pages(sgt, buffer->pages, nr_pages, 0,
+				nr_pages << PAGE_SHIFT, GFP_KERNEL);
+	if (ret)
+		goto err_free_sgt;
+
+	for_each_sg(sgt->sgl, sg, sgt->nents, i) {
+		sg_dma_address(sg) = sg_phys(sg);
+		sg_dma_len(sg) = sg->length;
+	}
+
+	if (!dma_map_sg(attachment->dev, sgt->sgl,
+			sgt->nents, direction)) {
+		ret = -ENOMEM;
+		goto err_free_sg_table;
+	}
+
+	return sgt;
+
+err_free_sg_table:
+	sg_free_table(sgt);
+err_free_sgt:
+	kfree(sgt);
+	return ERR_PTR(ret);
 }
 
 static void ion_unmap_dma_buf(struct dma_buf_attachment *attachment,
 			      struct sg_table *table,
 			      enum dma_data_direction direction)
 {
+	dma_unmap_sg(attachment->dev, table->sgl, table->nents, direction);
+	sg_free_table(table);
+	kfree(table);
 }
 
 void ion_pages_sync_for_device(struct device *dev, struct page *page,
@@ -1499,6 +1552,8 @@ static int ion_sync_for_device(struct ion_client *client, int fd)
 {
 	struct dma_buf *dmabuf;
 	struct ion_buffer *buffer;
+	struct ion_device *idev = client->dev;
+	struct device *dev = ion_device_get_platform(idev);
 
 	dmabuf = dma_buf_get(fd);
 	if (IS_ERR(dmabuf))
@@ -1513,7 +1568,7 @@ static int ion_sync_for_device(struct ion_client *client, int fd)
 	}
 	buffer = dmabuf->priv;
 
-	dma_sync_sg_for_device(NULL, buffer->sg_table->sgl,
+	dma_sync_sg_for_device(dev, buffer->sg_table->sgl,
 			       buffer->sg_table->nents, DMA_BIDIRECTIONAL);
 	dma_buf_put(dmabuf);
 	return 0;
@@ -1858,6 +1913,20 @@ void ion_device_add_heap(struct ion_device *dev, struct ion_heap *heap)
 	up_write(&dev->lock);
 }
 EXPORT_SYMBOL(ion_device_add_heap);
+
+struct device *ion_device_get_platform(struct ion_device *idev)
+{
+	if (!idev)
+		return NULL;
+
+	return idev->pdev;
+}
+
+void ion_device_set_platform(struct ion_device *idev, struct device *dev)
+{
+	if (dev && !idev->pdev)
+		idev->pdev = dev;
+}
 
 struct ion_device *ion_device_create(long (*custom_ioctl)
 				     (struct ion_client *client,

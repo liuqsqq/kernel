@@ -184,6 +184,7 @@ static const struct rk808_reg_data rk808_pre_init_reg[] = {
 	{ RK808_BUCK1_CONFIG_REG, BUCK1_RATE_MASK,  BUCK_ILMIN_200MA },
 	{ RK808_BUCK2_CONFIG_REG, BUCK2_RATE_MASK,  BUCK_ILMIN_200MA },
 	{ RK808_DCDC_UV_ACT_REG,  BUCK_UV_ACT_MASK, BUCK_UV_ACT_DISABLE},
+	{ RK808_RTC_CTRL_REG, RTC_STOP, RTC_STOP},
 	{ RK808_VB_MON_REG,       MASK_ALL,         VB_LO_ACT |
 						    VB_LO_SEL_3500MV },
 };
@@ -252,7 +253,7 @@ static const struct regmap_config rk818_regmap_config = {
 
 static const struct mfd_cell rk818s[] = {
 	{ .name = "rk808-clkout", },
-	{ .name = "rk818-regulator", },
+	{ .name = "rk808-regulator", },
 	{ .name = "rk818-battery", .of_compatible = "rk818-battery", },
 	{ .name = "rk818-charger", },
 	{
@@ -269,6 +270,7 @@ static const struct rk808_reg_data rk818_pre_init_reg[] = {
 					BOOST_EN_ENABLE | SWITCH_EN_ENABLE },
 	{ RK818_SLEEP_SET_OFF_REG1, OTG_SLP_SET_MASK, OTG_SLP_SET_OFF },
 	{ RK818_BUCK4_CONFIG_REG, BUCK_ILMIN_MASK,  BUCK_ILMIN_250MA },
+	{ RK808_RTC_CTRL_REG, RTC_STOP, RTC_STOP},
 };
 
 static const struct regmap_irq rk818_irqs[] = {
@@ -416,6 +418,7 @@ static const struct mfd_cell rk805s[] = {
 static const struct rk808_reg_data rk805_pre_init_reg[] = {
 	{RK805_BUCK4_CONFIG_REG, BUCK_ILMIN_MASK, BUCK_ILMIN_400MA},
 	{RK805_GPIO_IO_POL_REG, SLP_SD_MSK, SLEEP_FUN},
+	{RK808_RTC_CTRL_REG, RTC_STOP, RTC_STOP},
 	{RK805_THERMAL_REG, TEMP_HOTDIE_MSK, TEMP115C},
 };
 
@@ -466,6 +469,54 @@ static void rk808_device_shutdown(void)
 			dev_err(&rk808_i2c_client->dev, "power off error!\n");
 	}
 }
+
+static ssize_t rk8xx_dbg_store(struct device *dev,
+			       struct device_attribute *attr,
+			       const char *buf, size_t count)
+{
+	int ret;
+	char cmd;
+	u32 input[2], addr, data;
+	struct rk808 *rk808 = i2c_get_clientdata(rk808_i2c_client);
+
+	ret = sscanf(buf, "%c ", &cmd);
+	switch (cmd) {
+	case 'w':
+		ret = sscanf(buf, "%c %x %x ", &cmd, &input[0], &input[1]);
+		if (ret != 3) {
+			pr_err("erro! cmd format: echo w [addr] [value]\n");
+			goto out;
+		};
+		addr = input[0] & 0xff;
+		data = input[1] & 0xff;
+		pr_info("cmd : %c %x %x\n\n", cmd, input[0], input[1]);
+		regmap_write(rk808->regmap, addr, data);
+		regmap_read(rk808->regmap, addr, &data);
+		pr_info("new: %x %x\n", addr, data);
+		break;
+	case 'r':
+		ret = sscanf(buf, "%c %x ", &cmd, &input[0]);
+		if (ret != 2) {
+			pr_err("erro! cmd format: echo r [addr]\n");
+			goto out;
+		};
+		pr_info("cmd : %c %x\n\n", cmd, input[0]);
+		addr = input[0] & 0xff;
+		regmap_read(rk808->regmap, addr, &data);
+		pr_info("%x %x\n", input[0], data);
+		break;
+	default:
+		pr_err("Unknown command\n");
+		break;
+	}
+
+out:
+	return count;
+}
+
+static struct kobject *rk8xx_kobj;
+static struct device_attribute rk8xx_attrs =
+		__ATTR(rk8xx_dbg, 0200, NULL, rk8xx_dbg_store);
 
 static const struct of_device_id rk808_of_match[] = {
 	{ .compatible = "rockchip,rk805" },
@@ -626,6 +677,13 @@ static int rk808_probe(struct i2c_client *client,
 			pm_shutdown = pm_shutdown_fn;
 			pm_power_off = rk808_device_shutdown;
 		}
+	}
+
+	rk8xx_kobj = kobject_create_and_add("rk8xx", NULL);
+	if (rk8xx_kobj) {
+		ret = sysfs_create_file(rk8xx_kobj, &rk8xx_attrs.attr);
+		if (ret)
+			dev_err(&client->dev, "create rk8xx sysfs error\n");
 	}
 
 	return 0;

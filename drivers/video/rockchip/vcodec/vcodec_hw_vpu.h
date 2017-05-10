@@ -177,6 +177,7 @@ static struct vpu_task_info task_vpu[TASK_TYPE_BUTT] = {
 	},
 	{
 		.name = "vpu_dec_pp",
+		.reg_rlc = 12,
 		.reg_en = VPU_REG_EN_DEC,
 		.reg_irq = VPU_DEC_INTERRUPT_REGISTER,
 		.reg_len = 12,
@@ -254,7 +255,7 @@ static struct vpu_hw_info hw_vpu_9190 = {
  * file handle translate information
  */
 DEF_FMT_TRANS_TBL(vpu_jpegd,
-		  12, 40, 66, 67
+		  12, 13, 14, 40, 66, 67
 );
 
 DEF_FMT_TRANS_TBL(vpu_h264d,

@@ -111,7 +111,7 @@
 			sound-dai = <&i2s2>;
 		};
 		simple-audio-card,codec {
-			sound-dai = <&dw_hdmi_audio>;
+			sound-dai = <&hdmi>;
 		};
 	};
 
@@ -168,7 +168,7 @@
 
 	vdd_log: vdd-log {
 		compatible = "pwm-regulator";
-		pwms = <&pwm2 0 25000 0>;
+		pwms = <&pwm2 0 25000 1>;
 		regulator-name = "vdd_log";
 		regulator-min-microvolt = <800000>;
 		regulator-max-microvolt = <1400000>;
@@ -492,6 +492,10 @@
 	audio-supply = <&vcca1v8_codec>;	/* audio_gpio3d4a_ms */
 	sdmmc-supply = <&vcc_sd>;		/* sdmmc_gpio4b_ms */
 	gpio1830-supply = <&vcc_3v0>;		/* gpio1833_gpio4cd_ms */
+};
+
+&pcie_phy {
+	status = "okay";
 };
 
 &pcie0 {

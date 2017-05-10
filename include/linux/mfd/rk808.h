@@ -52,6 +52,7 @@ enum rk818_reg {
 	RK818_ID_DCDC2,
 	RK818_ID_DCDC3,
 	RK818_ID_DCDC4,
+	RK818_ID_BOOST,
 	RK818_ID_LDO1,
 	RK818_ID_LDO2,
 	RK818_ID_LDO3,
@@ -62,6 +63,8 @@ enum rk818_reg {
 	RK818_ID_LDO8,
 	RK818_ID_LDO9,
 	RK818_ID_SWITCH,
+	RK818_ID_HDMI_SWITCH,
+	RK818_ID_OTG_SWITCH,
 };
 
 enum rk805_reg {
@@ -274,7 +277,7 @@ enum rk805_reg {
 #define RK818_CALC_REST_REGH		0xf0
 #define RK818_CALC_REST_REGL		0xf1
 #define RK818_SAVE_DATA19		0xf2
-#define RK818_NUM_REGULATORS		14
+#define RK818_NUM_REGULATORS		17
 
 /* IRQ Definitions */
 #define RK808_IRQ_VOUT_LO	0
@@ -324,6 +327,7 @@ enum rk805_reg {
 #define SWITCH1_EN	BIT(5)
 #define DEV_OFF_RST	BIT(3)
 #define DEV_OFF		BIT(0)
+#define RTC_STOP	BIT(0)
 
 #define VB_LO_ACT		BIT(4)
 #define VB_LO_SEL_3500MV	(7 << 0)
@@ -389,6 +393,7 @@ enum rk805_reg {
 #define LDO9_SLP_SET_OFF	BIT(5)
 #define SWITCH_SLP_SET_OFF	BIT(6)
 #define OTG_SLP_SET_OFF		BIT(7)
+#define OTG_BOOST_SLP_OFF	(BOOST_SLP_SET_OFF | OTG_SLP_SET_OFF)
 
 #define BUCK1_SLP_SET_ON	BIT(0)
 #define BUCK2_SLP_SET_ON	BIT(1)

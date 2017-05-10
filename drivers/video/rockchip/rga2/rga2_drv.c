@@ -59,7 +59,7 @@
 #define RGA2_TEST_FLUSH_TIME 0
 #define RGA2_INFO_BUS_ERROR 1
 #define RGA2_POWER_OFF_DELAY	4*HZ /* 4s */
-#define RGA2_TIMEOUT_DELAY	2*HZ /* 2s */
+#define RGA2_TIMEOUT_DELAY	(HZ / 10) /* 100ms */
 #define RGA2_MAJOR		255
 #define RGA2_RESET_TIMEOUT	1000
 
@@ -159,11 +159,30 @@ static inline int rga2_init_version(void)
 		pr_err("rga2_drvdata is null\n");
 		return -EINVAL;
 	}
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0))
+	pm_runtime_get_sync(rga2_drvdata->dev);
+#endif
+
+	clk_prepare_enable(rga2_drvdata->aclk_rga2);
+	clk_prepare_enable(rga2_drvdata->hclk_rga2);
 
 	reg_version = rga2_read(0x028);
+
+	clk_disable_unprepare(rga2_drvdata->aclk_rga2);
+	clk_disable_unprepare(rga2_drvdata->hclk_rga2);
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0))
+	pm_runtime_put(rga2_drvdata->dev);
+#endif
+
 	major_version = (reg_version & RGA2_MAJOR_VERSION_MASK) >> 24;
 	minor_version = (reg_version & RGA2_MINOR_VERSION_MASK) >> 20;
 
+	/*
+	 * some old rga ip has no rga version register, so force set to 2.00
+	 */
+	if (!major_version && !minor_version)
+		major_version = 2;
 	sprintf(rga->version, "%d.%02d", major_version, minor_version);
 
 	return 0;
@@ -174,7 +193,7 @@ static void rga2_soft_reset(void)
 	u32 i;
 	u32 reg;
 
-	rga2_write((1 << 3) | (1 << 4), RGA2_SYS_CTRL); //RGA_SYS_CTRL
+	rga2_write((1 << 3) | (1 << 4) | (1 << 6), RGA2_SYS_CTRL);
 
 	for(i = 0; i < RGA2_RESET_TIMEOUT; i++)
 	{
@@ -899,8 +918,14 @@ static int rga2_blit_async(rga2_session *session, struct rga2_req *req)
 
 static int rga2_blit_sync(rga2_session *session, struct rga2_req *req)
 {
+	struct rga2_req req_bak;
+	int restore = 0;
+	int try = 10;
 	int ret = -1;
 	int ret_timeout = 0;
+
+	memcpy(&req_bak, req, sizeof(req_bak));
+retry:
 
 #if RGA2_TEST_MSG
 	if (1) {//req->bitblt_mode == 0x2) {
@@ -943,9 +968,32 @@ static int rga2_blit_sync(rga2_session *session, struct rga2_req *req)
 	rga2_end = ktime_sub(rga2_end, rga2_start);
 	printk("sync one cmd end time %d\n", (int)ktime_to_us(rga2_end));
 #endif
+	if (ret == -ETIMEDOUT && try--) {
+		memcpy(req, &req_bak, sizeof(req_bak));
+		/*
+		 * if rga work timeout with scaling, need do a non-scale work
+		 * first, restore hardware status, then do actually work.
+		 */
+		if (req->src.act_w != req->dst.act_w ||
+		    req->src.act_h != req->dst.act_h) {
+			req->src.act_w = MIN(320, MIN(req->src.act_w,
+						      req->dst.act_w));
+			req->src.act_h = MIN(240, MIN(req->src.act_h,
+						      req->dst.act_h));
+			req->dst.act_w = req->src.act_w;
+			req->dst.act_h = req->src.act_h;
+			restore = 1;
+		}
+		goto retry;
+	}
+	if (!ret && restore) {
+		memcpy(req, &req_bak, sizeof(req_bak));
+		restore = 0;
+		goto retry;
+	}
 
 	return ret;
-	}
+}
 
 static long rga_ioctl(struct file *file, uint32_t cmd, unsigned long arg)
 {
@@ -1660,7 +1708,7 @@ void rga2_test_0(void)
 }
 #endif
 
-module_init(rga2_init);
+late_initcall(rga2_init);
 module_exit(rga2_exit);
 
 /* Module information */

@@ -309,8 +309,10 @@ struct clk *rockchip_clk_register_mmc(const char *name,
  * there may have serval ways to set ddr clock, use
  * this flag to distinguish them.
  * ROCKCHIP_DDRCLK_SIP: use SIP call to bl31 to change ddrclk rate.
+ * ROCKCHIP_DDRCLK_SCPI: use SCPI APIs to let mcu change ddrclk rate.
  */
 #define ROCKCHIP_DDRCLK_SIP		0x01
+#define ROCKCHIP_DDRCLK_SCPI		0x02
 
 struct clk *rockchip_clk_register_ddrclk(const char *name, int flags,
 					 const char *const *parent_names,
@@ -695,6 +697,7 @@ void rockchip_clk_register_armclk(struct rockchip_clk_provider *ctx,
 			const struct rockchip_cpuclk_rate_table *rates,
 			int nrates);
 void rockchip_clk_protect_critical(const char *const clocks[], int nclocks);
+int rockchip_pll_clk_adaptive_scaling(struct clk *clk, int sel);
 void rockchip_register_restart_notifier(struct rockchip_clk_provider *ctx,
 					unsigned int reg, void (*cb)(void));
 

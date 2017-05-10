@@ -188,6 +188,7 @@
 	broken-cd;
 	bus-width = <8>;
 	cap-mmc-highspeed;
+	mmc-hs200-1_8v;
 	disable-wp;
 	mmc-pwrseq = <&emmc_pwrseq>;
 	non-removable;
@@ -236,6 +237,15 @@
 		clock-output-names = "xin32k";
 		/* rtc_int is not connected */
 	};
+};
+
+&io_domains {
+	status = "ok";
+
+	audio-supply = <&vcc_io>;
+	gpio30-supply = <&vcc_io>;
+	gpio1830-supply = <&vcc_io>;
+	wifi-supply = <&vccio_wl>;
 };
 
 &sdio0 {
@@ -329,6 +339,13 @@
 			rockchip,pins = <0 4 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
 	};
+};
+
+&pmu_io_domains {
+	status = "okay";
+
+	pmu-supply = <&vcc_io>;
+	vop-supply = <&vcc_io>;
 };
 
 &saradc {

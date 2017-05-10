@@ -1898,7 +1898,7 @@ static void dce_v11_0_afmt_setmode(struct drm_encoder *encoder,
 	dce_v11_0_audio_write_sad_regs(encoder);
 	dce_v11_0_audio_write_latency_fields(encoder, mode);
 
-	err = drm_hdmi_avi_infoframe_from_display_mode(&frame, mode);
+	err = drm_hdmi_avi_infoframe_from_display_mode(&frame, mode, false);
 	if (err < 0) {
 		DRM_ERROR("failed to setup AVI infoframe: %zd\n", err);
 		return;
@@ -3704,8 +3704,14 @@ static void dce_v11_0_encoder_add(struct amdgpu_device *adev,
 	default:
 		encoder->possible_crtcs = 0x3;
 		break;
+	case 3:
+		encoder->possible_crtcs = 0x7;
+		break;
 	case 4:
 		encoder->possible_crtcs = 0xf;
+		break;
+	case 5:
+		encoder->possible_crtcs = 0x1f;
 		break;
 	case 6:
 		encoder->possible_crtcs = 0x3f;

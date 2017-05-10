@@ -151,7 +151,7 @@ PNAME(mux_pll_src_dmyvpll_cpll_gpll_p)		= { "dummy_vpll", "cpll", "gpll" };
 PNAME(mux_aclk_cci_p)				= { "dummy_cpll",
 						    "gpll_aclk_cci_src",
 						    "npll_aclk_cci_src",
-						    "vpll_aclk_cci_src" };
+						    "dummy_vpll" };
 PNAME(mux_cci_trace_p)				= { "dummy_cpll",
 						    "gpll_cci_trace" };
 PNAME(mux_cs_p)					= { "dummy_cpll", "gpll_cs",
@@ -205,7 +205,7 @@ PNAME(mux_aclk_gmac_p)			= { "dummy_cpll",
 PNAME(mux_aclk_cci_p)				= { "cpll_aclk_cci_src",
 						    "gpll_aclk_cci_src",
 						    "npll_aclk_cci_src",
-						    "vpll_aclk_cci_src" };
+						    "dummy_vpll" };
 PNAME(mux_cci_trace_p)				= { "cpll_cci_trace",
 						    "gpll_cci_trace" };
 PNAME(mux_cs_p)					= { "cpll_cs", "gpll_cs",
@@ -307,14 +307,19 @@ static struct rockchip_pll_clock rk3399_pll_clks[] __initdata = {
 		     RK3399_PLL_CON(11), 8, 31, 0, rk3399_pll_rates),
 	[dpll] = PLL(pll_rk3399, PLL_DPLL, "dpll", mux_pll_p, 0, RK3399_PLL_CON(16),
 		     RK3399_PLL_CON(19), 8, 31, 0, NULL),
+#ifdef RK3399_TWO_PLL_FOR_VOP
+	[cpll] = PLL(pll_rk3399, PLL_CPLL, "cpll", mux_pll_p, 0, RK3399_PLL_CON(24),
+		     RK3399_PLL_CON(27), 8, 31, 0, rk3399_pll_rates),
+#else
 	[cpll] = PLL(pll_rk3399, PLL_CPLL, "cpll", mux_pll_p, 0, RK3399_PLL_CON(24),
 		     RK3399_PLL_CON(27), 8, 31, ROCKCHIP_PLL_SYNC_RATE, rk3399_pll_rates),
+#endif
 	[gpll] = PLL(pll_rk3399, PLL_GPLL, "gpll", mux_pll_p, 0, RK3399_PLL_CON(32),
 		     RK3399_PLL_CON(35), 8, 31, ROCKCHIP_PLL_SYNC_RATE, rk3399_pll_rates),
 	[npll] = PLL(pll_rk3399, PLL_NPLL, "npll",  mux_pll_p, 0, RK3399_PLL_CON(40),
 		     RK3399_PLL_CON(43), 8, 31, ROCKCHIP_PLL_SYNC_RATE, rk3399_pll_rates),
 	[vpll] = PLL(pll_rk3399, PLL_VPLL, "vpll",  mux_pll_p, 0, RK3399_PLL_CON(48),
-		     RK3399_PLL_CON(51), 8, 31, ROCKCHIP_PLL_SYNC_RATE, rk3399_vpll_rates),
+		     RK3399_PLL_CON(51), 8, 31, 0, rk3399_vpll_rates),
 };
 
 static struct rockchip_pll_clock rk3399_pmu_pll_clks[] __initdata = {

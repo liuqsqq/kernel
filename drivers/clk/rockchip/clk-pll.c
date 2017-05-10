@@ -47,6 +47,8 @@ struct rockchip_clk_pll {
 	u8			flags;
 	const struct rockchip_pll_rate_table *rate_table;
 	unsigned int		rate_count;
+	int			sel;
+	unsigned long		scaling;
 	spinlock_t		*lock;
 
 	struct rockchip_clk_provider *ctx;
@@ -84,6 +86,23 @@ static int rockchip_rk3366_pll_set_params(struct rockchip_clk_pll *pll,
 
 static struct rockchip_pll_rate_table auto_table;
 
+int rockchip_pll_clk_adaptive_scaling(struct clk *clk, int sel)
+{
+	struct clk *parent = clk_get_parent(clk);
+	struct rockchip_clk_pll *pll;
+
+	if (IS_ERR_OR_NULL(parent))
+		return -EINVAL;
+
+	pll = to_rockchip_clk_pll(__clk_get_hw(parent));
+	if (!pll)
+		return -EINVAL;
+
+	pll->sel = sel;
+
+	return 0;
+}
+
 static struct rockchip_pll_rate_table *rk_pll_rate_table_get(void)
 {
 	return &auto_table;
@@ -106,9 +125,9 @@ static int rockchip_pll_clk_set_postdiv(unsigned long fout_hz,
 					return 0;
 				}
 			}
-			pr_err("CANNOT FIND postdiv1/2 to make fout in range from 800M to 2000M,fout = %lu\n",
-			       fout_hz);
 		}
+		pr_err("CANNOT FIND postdiv1/2 to make fout in range from 800M to 2000M,fout = %lu\n",
+		       fout_hz);
 	} else {
 		*postdiv1 = 1;
 		*postdiv2 = 1;
@@ -243,11 +262,9 @@ rockchip_rk3066_pll_clk_set_by_auto(struct rockchip_clk_pll *pll,
 
 	/* output the best PLL setting */
 	if ((nr_out <= PLL_NR_MAX) && (no_out > 0)) {
-		if (rate_table->nr && rate_table->nf && rate_table->no) {
-			rate_table->nr = nr_out;
-			rate_table->nf = nf_out;
-			rate_table->no = no_out;
-		}
+		rate_table->nr = nr_out;
+		rate_table->nf = nf_out;
+		rate_table->no = no_out;
 	} else {
 		return NULL;
 	}
@@ -262,11 +279,18 @@ static const struct rockchip_pll_rate_table *rockchip_get_pll_settings(
 	int i;
 
 	for (i = 0; i < pll->rate_count; i++) {
-		if (rate == rate_table[i].rate)
+		if (rate == rate_table[i].rate) {
+			if (i < pll->sel) {
+				pll->scaling = rate;
+				return &rate_table[pll->sel];
+			}
+			pll->scaling = 0;
 			return &rate_table[i];
+		}
 	}
+	pll->scaling = 0;
 
-	if (pll->type == pll_rk3066 || pll->type == pll_rk3328)
+	if (pll->type == pll_rk3066)
 		return rockchip_rk3066_pll_clk_set_by_auto(pll, 24 * MHZ, rate);
 	else
 		return rockchip_pll_clk_set_by_auto(pll, 24 * MHZ, rate);
@@ -475,6 +499,7 @@ static int rockchip_rk3036_pll_enable(struct clk_hw *hw)
 
 	writel(HIWORD_UPDATE(0, RK3036_PLLCON1_PWRDOWN, 0),
 	       pll->reg_base + RK3036_PLLCON(1));
+	rockchip_pll_wait_lock(pll);
 
 	return 0;
 }
@@ -618,6 +643,9 @@ static unsigned long rockchip_rk3066_pll_recalc_rate(struct clk_hw *hw,
 		return prate;
 	}
 
+	if (pll->sel && pll->scaling)
+		return pll->scaling;
+
 	rockchip_rk3066_pll_get_params(pll, &cur);
 
 	rate64 *= cur.nf;
@@ -693,6 +721,7 @@ static int rockchip_rk3066_pll_set_rate(struct clk_hw *hw, unsigned long drate,
 	const struct rockchip_pll_rate_table *rate;
 	unsigned long old_rate = rockchip_rk3066_pll_recalc_rate(hw, prate);
 	struct regmap *grf = rockchip_clk_get_grf(pll->ctx);
+	int ret;
 
 	if (IS_ERR(grf)) {
 		pr_debug("%s: grf regmap not available, aborting rate change\n",
@@ -711,7 +740,11 @@ static int rockchip_rk3066_pll_set_rate(struct clk_hw *hw, unsigned long drate,
 		return -EINVAL;
 	}
 
-	return rockchip_rk3066_pll_set_params(pll, rate);
+	ret = rockchip_rk3066_pll_set_params(pll, rate);
+	if (ret)
+		pll->scaling = 0;
+
+	return ret;
 }
 
 static int rockchip_rk3066_pll_enable(struct clk_hw *hw)
@@ -720,6 +753,7 @@ static int rockchip_rk3066_pll_enable(struct clk_hw *hw)
 
 	writel(HIWORD_UPDATE(0, RK3066_PLLCON3_PWRDOWN, 0),
 	       pll->reg_base + RK3066_PLLCON(3));
+	rockchip_pll_wait_lock(pll);
 
 	return 0;
 }
@@ -1132,6 +1166,7 @@ static int rockchip_rk3399_pll_enable(struct clk_hw *hw)
 
 	writel(HIWORD_UPDATE(0, RK3399_PLLCON3_PWRDOWN, 0),
 	       pll->reg_base + RK3399_PLLCON(3));
+	rockchip_rk3399_pll_wait_lock(pll);
 
 	return 0;
 }
