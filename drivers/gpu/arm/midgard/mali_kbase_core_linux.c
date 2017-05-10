@@ -13,7 +13,8 @@
  *
  */
 
-
+#define ENABLE_DEBUG_LOG
+#include "platform/rk/custom_log.h"
 
 #include <mali_kbase.h>
 #include <mali_kbase_config_defaults.h>
@@ -45,6 +46,7 @@
 #include <linux/syscalls.h>
 #endif /* CONFIG_KDS */
 
+#include <linux/pm_runtime.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/poll.h>
@@ -101,6 +103,9 @@
 static struct kbase_exported_test_data shared_kernel_test_data;
 EXPORT_SYMBOL(shared_kernel_test_data);
 #endif /* MALI_UNIT_TEST */
+
+/** rk_ext : version of rk_ext on mali_ko, aka. rk_ko_ver. */
+#define ROCKCHIP_VERSION    (13)
 
 static int kbase_dev_nr;
 
@@ -717,6 +722,7 @@ copy_failed:
 			/* version buffer size check is made in compile time assert */
 			memcpy(get_version->version_buffer, KERNEL_SIDE_DDK_VERSION_STRING, sizeof(KERNEL_SIDE_DDK_VERSION_STRING));
 			get_version->version_string_size = sizeof(KERNEL_SIDE_DDK_VERSION_STRING);
+			get_version->rk_version = ROCKCHIP_VERSION;
 			break;
 		}
 
@@ -3065,7 +3071,7 @@ static int power_control_init(struct platform_device *pdev)
 		dev_info(kbdev->dev, "Continuing without Mali clock control\n");
 		/* Allow probe to continue without clock. */
 	} else {
-		err = clk_prepare_enable(kbdev->clock);
+		err = clk_prepare(kbdev->clock);
 		if (err) {
 			dev_err(kbdev->dev,
 				"Failed to prepare and enable clock (%d)\n",
@@ -3116,7 +3122,7 @@ static void power_control_term(struct kbase_device *kbdev)
 #endif
 
 	if (kbdev->clock) {
-		clk_disable_unprepare(kbdev->clock);
+		clk_unprepare(kbdev->clock);
 		clk_put(kbdev->clock);
 		kbdev->clock = NULL;
 	}
@@ -3263,7 +3269,7 @@ static int kbase_device_debugfs_init(struct kbase_device *kbdev)
 #ifndef CONFIG_MALI_COH_USER
 	debugfs_create_bool("infinite_cache", 0644,
 			debugfs_ctx_defaults_directory,
-			&kbdev->infinite_cache_active_default);
+			(bool*)&(kbdev->infinite_cache_active_default));
 #endif /* CONFIG_MALI_COH_USER */
 
 	debugfs_create_size_t("mem_pool_max_size", 0644,
@@ -3528,6 +3534,13 @@ static int kbase_platform_device_remove(struct platform_device *pdev)
 	return 0;
 }
 
+extern void kbase_platform_rk_shutdown(struct kbase_device *kbdev);
+static void kbase_platform_device_shutdown(struct platform_device *pdev)
+{
+	struct kbase_device *kbdev = to_kbase_device(&pdev->dev);
+
+	kbase_platform_rk_shutdown(kbdev);
+}
 
 /* Number of register accesses for the buffer that we allocate during
  * initialization time. The buffer size can be changed later via debugfs. */
@@ -3935,7 +3948,7 @@ static const struct dev_pm_ops kbase_pm_ops = {
 
 #ifdef CONFIG_OF
 static const struct of_device_id kbase_dt_ids[] = {
-	{ .compatible = "arm,malit6xx" },
+	{ .compatible = "arm,malit7xx" },
 	{ .compatible = "arm,mali-midgard" },
 	{ /* sentinel */ }
 };
@@ -3945,6 +3958,7 @@ MODULE_DEVICE_TABLE(of, kbase_dt_ids);
 static struct platform_driver kbase_platform_driver = {
 	.probe = kbase_platform_device_probe,
 	.remove = kbase_platform_device_remove,
+	.shutdown = kbase_platform_device_shutdown,
 	.driver = {
 		   .name = kbase_drv_name,
 		   .owner = THIS_MODULE,
@@ -3960,6 +3974,12 @@ static struct platform_driver kbase_platform_driver = {
 #ifdef CONFIG_OF
 module_platform_driver(kbase_platform_driver);
 #else
+
+static int __init rockchip_gpu_init_driver(void)
+{
+	return platform_driver_register(&kbase_platform_driver);
+}
+late_initcall(rockchip_gpu_init_driver);
 
 static int __init kbase_driver_init(void)
 {

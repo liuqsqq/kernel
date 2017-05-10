@@ -1593,6 +1593,9 @@ static kbasep_js_release_result kbasep_js_runpool_release_ctx_internal(
 	if (new_ref_count == 0 &&
 		(!kbasep_js_is_submit_allowed(js_devdata, kctx) ||
 							kbdev->pm.suspending)) {
+		int num_slots = kbdev->gpu_props.num_job_slots;
+		int slot;
+
 		/* Last reference, and we've been told to remove this context
 		 * from the Run Pool */
 		dev_dbg(kbdev->dev, "JS: RunPool Remove Context %p because as_busy_refcount=%d, jobs=%d, allowed=%d",
