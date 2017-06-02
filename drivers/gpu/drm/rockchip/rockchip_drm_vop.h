@@ -115,6 +115,8 @@ struct vop_ctrl {
 	struct vop_reg dsp_black;
 	struct vop_reg dsp_blank;
 	struct vop_reg dsp_outzero;
+	struct vop_reg update_gamma_lut;
+	struct vop_reg lut_buffer_index;
 	struct vop_reg dsp_lut_en;
 
 	struct vop_reg out_mode;
@@ -489,6 +491,11 @@ static inline int scl_vop_cal_lb_mode(int width, bool is_yuv)
 		lb_mode = LB_YUV_2560X8;
 
 	return lb_mode;
+}
+
+static inline int us_to_vertical_line(struct drm_display_mode *mode, int us)
+{
+	return us * mode->clock / mode->htotal / 1000;
 }
 
 extern const struct component_ops vop_component_ops;

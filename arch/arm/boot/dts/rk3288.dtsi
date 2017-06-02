@@ -46,6 +46,7 @@
 #include <dt-bindings/thermal/thermal.h>
 #include <dt-bindings/power/rk3288-power.h>
 #include <dt-bindings/soc/rockchip,boot-mode.h>
+#include <dt-bindings/suspend/rockchip-rk3288.h>
 #include <dt-bindings/display/drm_mipi_dsi.h>
 #include "skeleton.dtsi"
 
@@ -128,58 +129,58 @@
 		compatible = "operating-points-v2";
 		opp-shared;
 
-		opp@126000000 {
+		opp-126000000 {
 			opp-hz = /bits/ 64 <126000000>;
 			opp-microvolt = <900000>;
 			clock-latency-ns = <40000>;
 		};
-		opp@216000000 {
+		opp-216000000 {
 			opp-hz = /bits/ 64 <216000000>;
 			opp-microvolt = <900000>;
 			clock-latency-ns = <40000>;
 		};
-		opp@408000000 {
+		opp-408000000 {
 			opp-hz = /bits/ 64 <408000000>;
 			opp-microvolt = <900000>;
 			clock-latency-ns = <40000>;
 		};
-		opp@600000000 {
+		opp-600000000 {
 			opp-hz = /bits/ 64 <600000000>;
 			opp-microvolt = <900000>;
 			clock-latency-ns = <40000>;
 		};
-		opp@696000000 {
+		opp-696000000 {
 			opp-hz = /bits/ 64 <696000000>;
 			opp-microvolt = <950000>;
 			clock-latency-ns = <40000>;
 		};
-		opp@816000000 {
+		opp-816000000 {
 			opp-hz = /bits/ 64 <816000000>;
 			opp-microvolt = <1000000>;
 			clock-latency-ns = <40000>;
 			opp-suspend;
 		};
-		opp@1008000000 {
+		opp-1008000000 {
 			opp-hz = /bits/ 64 <1008000000>;
 			opp-microvolt = <1050000>;
 			clock-latency-ns = <40000>;
 		};
-		opp@1200000000 {
+		opp-1200000000 {
 			opp-hz = /bits/ 64 <1200000000>;
 			opp-microvolt = <1100000>;
 			clock-latency-ns = <40000>;
 		};
-		opp@1416000000 {
+		opp-1416000000 {
 			opp-hz = /bits/ 64 <1416000000>;
 			opp-microvolt = <1200000>;
 			clock-latency-ns = <40000>;
 		};
-		opp@1512000000 {
+		opp-1512000000 {
 			opp-hz = /bits/ 64 <1512000000>;
 			opp-microvolt = <1300000>;
 			clock-latency-ns = <40000>;
 		};
-		opp@1608000000 {
+		opp-1608000000 {
 			opp-hz = /bits/ 64 <1608000000>;
 			opp-microvolt = <1350000>;
 			clock-latency-ns = <40000>;
@@ -963,7 +964,6 @@
 				       <150000000>, <75000000>,
 				       <300000000>, <150000000>,
 				       <75000000>;
-		assigned-clock-parents = <&cru PLL_NPLL>, <&cru PLL_GPLL>;
 	};
 
 	grf: syscon@ff770000 {
@@ -1148,7 +1148,7 @@
 
 	vopb: vop@ff930000 {
 		compatible = "rockchip,rk3288-vop";
-		reg = <0xff930000 0x19c>;
+		reg = <0xff930000 0x19c>, <0xff931000 0x1000>;
 		interrupts = <GIC_SPI 15 IRQ_TYPE_LEVEL_HIGH>;
 		clocks = <&cru ACLK_VOP0>, <&cru DCLK_VOP0>, <&cru HCLK_VOP0>;
 		clock-names = "aclk_vop", "dclk_vop", "hclk_vop";
@@ -1198,7 +1198,7 @@
 
 	vopl: vop@ff940000 {
 		compatible = "rockchip,rk3288-vop";
-		reg = <0xff940000 0x19c>;
+		reg = <0xff940000 0x19c>, <0xff941000 0x1000>;
 		interrupts = <GIC_SPI 16 IRQ_TYPE_LEVEL_HIGH>;
 		clocks = <&cru ACLK_VOP1>, <&cru DCLK_VOP1>, <&cru HCLK_VOP1>;
 		clock-names = "aclk_vop", "dclk_vop", "hclk_vop";
@@ -1399,7 +1399,6 @@
 		reset-names = "video_a", "video_h";
 		iommus = <&vpu_mmu>;
 		iommu_enabled = <1>; 
-		dev_mode = <0>; 
 		status = "disabled";
 		/* 0 means ion, 1 means drm */
 		allocator = <1>;
@@ -1440,7 +1439,6 @@
 		reset-names = "video";
 		power-domains = <&power RK3288_PD_HEVC>;
 		rockchip,grf = <&grf>;
-		dev_mode = <1>;
 		iommus = <&hevc_mmu>;
 		iommu_enabled = <1>;
 		status = "disabled";
@@ -1496,23 +1494,23 @@
 	gpu_opp_table: opp-table1 {
 		compatible = "operating-points-v2";
 
-		opp@100000000 {
+		opp-100000000 {
 			opp-hz = /bits/ 64 <100000000>;
 			opp-microvolt = <950000>;
 		};
-		opp@200000000 {
+		opp-200000000 {
 			opp-hz = /bits/ 64 <200000000>;
 			opp-microvolt = <950000>;
 		};
-		opp@300000000 {
+		opp-300000000 {
 			opp-hz = /bits/ 64 <300000000>;
 			opp-microvolt = <1000000>;
 		};
-		opp@400000000 {
+		opp-400000000 {
 			opp-hz = /bits/ 64 <400000000>;
 			opp-microvolt = <1100000>;
 		};
-		opp@600000000 {
+		opp-600000000 {
 			opp-hz = /bits/ 64 <600000000>;
 			opp-microvolt = <1250000>;
 		};
@@ -2213,5 +2211,27 @@
 			};
 		};
 
+	};
+	rockchip_suspend: rockchip-suspend {
+		compatible = "rockchip,pm-rk3288";
+		status = "disabled";
+		rockchip,sleep-mode-config = <
+			(0
+			|RKPM_CTR_PWR_DMNS
+			|RKPM_CTR_GTCLKS
+			|RKPM_CTR_PLLS
+			|RKPM_CTR_ARMOFF_LPMD
+			)
+		>;
+		rockchip,wakeup-config = <
+			(0
+			| RKPM_GPIO_WKUP_EN
+			)
+		>;
+		rockchip,pwm-regulator-config = <
+			(0
+			| PWM2_REGULATOR_EN
+			)
+		>;
 	};
 };

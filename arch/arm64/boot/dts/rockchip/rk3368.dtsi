@@ -47,10 +47,13 @@
 #include <dt-bindings/pinctrl/rockchip.h>
 #include <dt-bindings/power/rk3368-power.h>
 #include <dt-bindings/soc/rockchip,boot-mode.h>
+#include <dt-bindings/suspend/rockchip-rk3368.h>
 #include <dt-bindings/thermal/thermal.h>
 #include <dt-bindings/display/mipi_dsi.h>
 #include <dt-bindings/display/drm_mipi_dsi.h>
 #include <dt-bindings/display/media-bus-format.h>
+
+#include "rk3368-dram-default-timing.dtsi"
 
 / {
 	compatible = "rockchip,rk3368";
@@ -223,7 +226,7 @@
 		nvmem-cells = <&cpu_leakage>;
 		nvmem-cell-names = "cpu_leakage";
 
-		opp@216000000 {
+		opp-216000000 {
 			opp-hz = /bits/ 64 <216000000>;
 			opp-microvolt = <950000 950000 1350000>;
 			opp-microvolt-L0 = <1050000 1050000 1350000>;
@@ -231,35 +234,35 @@
 			clock-latency-ns = <40000>;
 			opp-suspend;
 		};
-		opp@408000000 {
+		opp-408000000 {
 			opp-hz = /bits/ 64 <408000000>;
 			opp-microvolt = <950000 950000 1350000>;
 			opp-microvolt-L0 = <1050000 1050000 1350000>;
 			opp-microvolt-L1 = <950000 950000 1350000>;
 			clock-latency-ns = <40000>;
 		};
-		opp@600000000 {
+		opp-600000000 {
 			opp-hz = /bits/ 64 <600000000>;
 			opp-microvolt = <950000 950000 1350000>;
 			opp-microvolt-L0 = <1050000 1050000 1350000>;
 			opp-microvolt-L1 = <950000 950000 1350000>;
 			clock-latency-ns = <40000>;
 		};
-		opp@816000000 {
+		opp-816000000 {
 			opp-hz = /bits/ 64 <816000000>;
 			opp-microvolt = <1025000 1025000 1350000>;
 			opp-microvolt-L0 = <1125000 1125000 1350000>;
 			opp-microvolt-L1 = <1025000 1025000 1350000>;
 			clock-latency-ns = <40000>;
 		};
-		opp@1008000000 {
+		opp-1008000000 {
 			opp-hz = /bits/ 64 <1008000000>;
 			opp-microvolt = <1125000 1125000 1350000>;
 			opp-microvolt-L0 = <1225000 1225000 1350000>;
 			opp-microvolt-L1 = <1125000 1125000 1350000>;
 			clock-latency-ns = <40000>;
 		};
-		opp@1200000000 {
+		opp-1200000000 {
 			opp-hz = /bits/ 64 <1200000000>;
 			opp-microvolt = <1225000 1225000 1350000>;
 			opp-microvolt-L0 = <1325000 1325000 1350000>;
@@ -283,7 +286,7 @@
 		nvmem-cells = <&cpu_leakage>;
 		nvmem-cell-names = "cpu_leakage";
 
-		opp@216000000 {
+		opp-216000000 {
 			opp-hz = /bits/ 64 <216000000>;
 			opp-microvolt = <950000 950000 1350000>;
 			opp-microvolt-L0 = <1050000 1050000 1350000>;
@@ -291,56 +294,56 @@
 			clock-latency-ns = <40000>;
 			opp-suspend;
 		};
-		opp@408000000 {
+		opp-408000000 {
 			opp-hz = /bits/ 64 <408000000>;
 			opp-microvolt = <950000 950000 1350000>;
 			opp-microvolt-L0 = <1050000 1050000 1350000>;
 			opp-microvolt-L1 = <950000 950000 1350000>;
 			clock-latency-ns = <40000>;
 		};
-		opp@600000000 {
+		opp-600000000 {
 			opp-hz = /bits/ 64 <600000000>;
 			opp-microvolt = <950000 950000 1350000>;
 			opp-microvolt-L0 = <1050000 1050000 1350000>;
 			opp-microvolt-L1 = <950000 950000 1350000>;
 			clock-latency-ns = <40000>;
 		};
-		opp@816000000 {
+		opp-816000000 {
 			opp-hz = /bits/ 64 <816000000>;
 			opp-microvolt = <975000 975000 1350000>;
 			opp-microvolt-L0 = <1075000 1075000 1350000>;
 			opp-microvolt-L1 = <975000 975000 1350000>;
 			clock-latency-ns = <40000>;
 		};
-		opp@1008000000 {
+		opp-1008000000 {
 			opp-hz = /bits/ 64 <1008000000>;
 			opp-microvolt = <1050000 1050000 1350000>;
 			opp-microvolt-L0 = <1150000 1150000 1350000>;
 			opp-microvolt-L1 = <1050000 1050000 1350000>;
 			clock-latency-ns = <40000>;
 		};
-		opp@1200000000 {
+		opp-1200000000 {
 			opp-hz = /bits/ 64 <1200000000>;
 			opp-microvolt = <1150000 1150000 1350000>;
 			opp-microvolt-L0 = <1250000 1250000 1350000>;
 			opp-microvolt-L1 = <1150000 1150000 1350000>;
 			clock-latency-ns = <40000>;
 		};
-		opp@1296000000 {
+		opp-1296000000 {
 			opp-hz = /bits/ 64 <1296000000>;
 			opp-microvolt = <1225000 1225000 1350000>;
 			opp-microvolt-L0 = <1350000 1350000 1350000>;
 			opp-microvolt-L1 = <1225000 1225000 1350000>;
 			clock-latency-ns = <40000>;
 		};
-		opp@1416000000 {
+		opp-1416000000 {
 			opp-hz = /bits/ 64 <1416000000>;
 			opp-microvolt = <1300000 1300000 1350000>;
 			opp-microvolt-L0 = <1350000 1350000 1350000>;
 			opp-microvolt-L1 = <1300000 1300000 1350000>;
 			clock-latency-ns = <40000>;
 		};
-		opp@1512000000 {
+		opp-1512000000 {
 			opp-hz = /bits/ 64 <1512000000>;
 			opp-microvolt = <1350000 1350000 1350000>;
 			opp-microvolt-L0 = <1350000 1350000 1350000>;
@@ -1180,6 +1183,50 @@
 				status = "disabled";
 			};
 		};
+
+		dfi: dfi {
+			compatible = "rockchip,rk3368-dfi";
+			status = "disabled";
+		};
+	};
+
+	dmc: dmc {
+		compatible = "rockchip,rk3368-dmc";
+		devfreq-events = <&dfi>;
+		clocks = <&cru SCLK_DDRCLK>, <&cru PCLK_DDRPHY>,
+			 <&cru PCLK_DDRUPCTL>;
+		clock-names = "dmc_clk", "pclk_phy", "pclk_upctl";
+		ddr_timing = <&ddr_timing>;
+		upthreshold = <50>;
+		downdifferential = <20>;
+		operating-points-v2 = <&dmc_opp_table>;
+		vop-dclk-mode = <0>;
+		status = "disabled";
+	};
+
+	dmc_opp_table: opp_table2 {
+		compatible = "operating-points-v2";
+
+		opp-192000000 {
+			opp-hz = /bits/ 64 <192000000>;
+			opp-microvolt = <1100000>;
+		};
+		opp-300000000 {
+			opp-hz = /bits/ 64 <300000000>;
+			opp-microvolt = <1100000>;
+		};
+		opp-396000000 {
+			opp-hz = /bits/ 64 <396000000>;
+			opp-microvolt = <1100000>;
+		};
+		opp-528000000 {
+			opp-hz = /bits/ 64 <528000000>;
+			opp-microvolt = <1100000>;
+		};
+		opp-600000000 {
+			opp-hz = /bits/ 64 <600000000>;
+			opp-microvolt = <1100000>;
+		};
 	};
 
 	wdt: watchdog@ff800000 {
@@ -1303,7 +1350,7 @@
 
 	vop: vop@ff930000 {
 		compatible = "rockchip,rk3368-vop";
-		reg = <0x0 0xff930000 0x0 0x2fc>;
+		reg = <0x0 0xff930000 0x0 0x2fc>, <0x0 0xff931000 0x0 0x400>;
 		interrupts = <GIC_SPI 15 IRQ_TYPE_LEVEL_HIGH>;
 		clocks = <&cru ACLK_VOP>, <&cru DCLK_VOP>, <&cru HCLK_VOP>;
 		clock-names = "aclk_vop", "dclk_vop", "hclk_vop";
@@ -1589,19 +1636,19 @@
 		compatible = "operating-points-v2";
 		opp-shared;
 
-		opp@200000000 {
+		opp-200000000 {
 			opp-hz = /bits/ 64 <200000000>;
 			opp-microvolt = <1100000>;
 		};
-		opp@288000000 {
+		opp-288000000 {
 			opp-hz = /bits/ 64 <288000000>;
 			opp-microvolt = <1100000>;
 		};
-		opp@400000000 {
+		opp-400000000 {
 			opp-hz = /bits/ 64 <400000000>;
 			opp-microvolt = <1100000>;
 		};
-		opp@576000000 {
+		opp-576000000 {
 			opp-hz = /bits/ 64 <576000000>;
 			opp-microvolt = <1200000>;
 		};
@@ -2023,7 +2070,7 @@
 		uart3 {
 			uart3_xfer: uart3-xfer {
 				rockchip,pins = <3 29 RK_FUNC_2 &pcfg_pull_up>,
-						<3 30 RK_FUNC_3 &pcfg_pull_none>;
+						<3 30 RK_FUNC_2 &pcfg_pull_none>;
 			};
 
 			uart3_cts: uart3-cts {
@@ -2171,5 +2218,27 @@
 					<0 29 RK_FUNC_GPIO &pcfg_pull_none>;  /* VSYN */
 			};
 		};
+	};
+
+	rockchip_suspend: rockchip-suspend {
+		compatible = "rockchip,pm-rk3368";
+		status = "disabled";
+		rockchip,sleep-debug-en = <0>;
+		rockchip,sleep-mode-config = <
+			(0
+			| RKPM_SLP_ARMOFF_LOGPD
+			| RKPM_SLP_PMU_PLLS_PWRDN
+			| RKPM_SLP_PMU_PMUALIVE_32K
+			| RKPM_SLP_SFT_PLLS_DEEP
+			| RKPM_SLP_PMU_DIS_OSC
+			| RKPM_SLP_SFT_PD_NBSCUS
+			)
+		>;
+		rockchip,wakeup-config = <
+			(0
+			| RKPM_GPIO_WKUP_EN
+			| RKPM_USB_WKUP_EN
+			)
+		>;
 	};
 };

@@ -7,7 +7,7 @@
 #include "camsys_soc_priv.h"
 #include "ext_flashled_drv/rk_ext_fshled_ctl.h"
 
-unsigned int camsys_debug = 1;
+unsigned int camsys_debug = 0;
 module_param(camsys_debug, int, S_IRUGO|S_IWUSR);
 static int drv_version = CAMSYS_DRIVER_VERSION;
 module_param(drv_version, int, S_IRUGO);
@@ -244,7 +244,7 @@ static int camsys_extdev_register(camsys_devio_name_t *devio, camsys_dev_t
 	for (i = (CamSys_Gpio_Start_Tag+1); i < CamSys_Gpio_End_Tag; i++) {
 		if (strcmp(gpio_info->name, "NC")) {
 			gpio->io = camsys_gpio_get(gpio_info->name);
-			if (gpio->io < 0) {
+			if (!gpio_is_valid(gpio->io)) {
 				camsys_err(
 					"Get %s gpio for dev_id 0x%x failed!",
 					gpio_info->name,
@@ -424,11 +424,12 @@ static int camsys_sysctl_external(camsys_sysctrl_t *devctl,
 			continue;
 
 		extdev = camsys_find_extdev((1 << (i+24)), camsys_dev);
-		if (extdev == NULL)
+		if (!extdev) {
 			camsys_err("Can not find dev_id 0x%x device in %s!",
 			(1<<(i+24)),
 			dev_name(camsys_dev->miscdev.this_device));
-
+			return -EINVAL;
+		}
 		camsys_sysctl_extdev(
 			extdev, devctl, camsys_dev);
 
@@ -569,8 +570,9 @@ static int camsys_irq_connect(camsys_irqcnnt_t *irqcnnt, camsys_dev_t
 		list_for_each_entry(irqpool, &camsys_dev->irq.irq_pool, list) {
 			if (irqpool->pid == irqcnnt->pid) {
 				camsys_warn("this thread(pid: %d) had been connect irq!",
-					current->pid);
-				spin_unlock(&camsys_dev->irq.lock);
+					     current->pid);
+				spin_unlock_irqrestore(&camsys_dev->irq.lock,
+						       flags);
 				goto end;
 			}
 		}
@@ -578,6 +580,10 @@ static int camsys_irq_connect(camsys_irqcnnt_t *irqcnnt, camsys_dev_t
 	spin_unlock_irqrestore(&camsys_dev->irq.lock, flags);
 
 	irqpool = kzalloc(sizeof(camsys_irqpool_t), GFP_KERNEL);
+	if (!irqpool) {
+		err = -ENOMEM;
+		goto end;
+	}
 	if (irqpool) {
 		spin_lock_init(&irqpool->lock);
 		irqpool->pid = irqcnnt->pid;
@@ -797,7 +803,12 @@ static int camsys_open(struct inode *inode, struct file *file)
 		}
 	}
 	spin_unlock(&camsys_devs.lock);
-
+	if (atomic_read(&camsys_dev->refcount) >= 1) {
+		camsys_err("%s has been opened!",
+			dev_name(camsys_dev->miscdev.this_device));
+		err = -EBUSY;
+		goto end;
+	}
 	INIT_LIST_HEAD(&camsys_dev->extdevs.active);
 
 	if (camsys_dev->mipiphy != NULL) {
@@ -816,6 +827,7 @@ static int camsys_open(struct inode *inode, struct file *file)
 		err = -ENODEV;
 		goto end;
 	} else {
+		atomic_inc(&camsys_dev->refcount);
 		camsys_trace(1,
 			"%s(%p) is opened!",
 			dev_name(camsys_dev->miscdev.this_device), camsys_dev);
@@ -841,7 +853,7 @@ static int camsys_release(struct inode *inode, struct file *file)
 			}
 		}
 	}
-
+	atomic_dec(&camsys_dev->refcount);
 	camsys_trace(1,
 		"%s(%p) is closed",
 		dev_name(camsys_dev->miscdev.this_device),
@@ -931,7 +943,7 @@ static long camsys_ioctl_compat(struct file *filp, unsigned int cmd, unsigned
 					"iommu status not consistent,"
 					"check the dts file !isp:%d,vpu:%d",
 					iommu_enabled, vpu_iommu_enabled);
-					return -EFAULT;
+				return -EFAULT;
 			}
 		}
 
@@ -1388,7 +1400,7 @@ static int camsys_platform_probe(struct platform_device *pdev)
 	struct resource register_res;
 	struct device *dev = &pdev->dev;
 	unsigned long i2cmem;
-	camsys_meminfo_t *meminfo;
+	camsys_meminfo_t *meminfo, *meminfo_fail;
 	unsigned int irq_id;
 	const char *compatible = NULL;
 
@@ -1420,9 +1432,9 @@ static int camsys_platform_probe(struct platform_device *pdev)
 
 	/* map irqs */
 	irq_id = irq_of_parse_and_map(dev->of_node, 0);
-	if (irq_id < 0) {
+	if (!irq_id) {
 		camsys_err("Get irq resource from %s platform device failed!",
-			pdev->name);
+			   pdev->name);
 		err = -ENODEV;
 		goto fail_end;
 	}
@@ -1559,25 +1571,25 @@ static int camsys_platform_probe(struct platform_device *pdev)
 request_mem_fail:
 	if (camsys_dev != NULL) {
 		while (!list_empty(&camsys_dev->devmems.memslist)) {
-			meminfo = list_first_entry(
+			meminfo_fail = list_first_entry(
 				&camsys_dev->devmems.memslist,
 				camsys_meminfo_t, list);
-			if (!meminfo)
+			if (!meminfo_fail)
 				continue;
 
-			list_del_init(&meminfo->list);
-			if (strcmp(meminfo->name,
-				CAMSYS_REGISTER_MEM_NAME) == 0) {
-				iounmap((void __iomem *)meminfo->vir_base);
+			list_del_init(&meminfo_fail->list);
+			if (strcmp(meminfo_fail->name,
+				   CAMSYS_REGISTER_MEM_NAME) == 0) {
+				iounmap((void __iomem *)meminfo_fail->vir_base);
 				release_mem_region(
-					meminfo->phy_base,
-					meminfo->size);
-			} else if (strcmp(meminfo->name,
+					meminfo_fail->phy_base,
+					meminfo_fail->size);
+			} else if (strcmp(meminfo_fail->name,
 				CAMSYS_I2C_MEM_NAME) == 0) {
-				kfree((void *)meminfo->vir_base);
+				kfree((void *)meminfo_fail->vir_base);
 			}
-			kfree(meminfo);
-			meminfo = NULL;
+			kfree(meminfo_fail);
+			meminfo_fail = NULL;
 		}
 
 		kfree(camsys_dev);
@@ -1596,7 +1608,7 @@ static int  camsys_platform_remove(struct platform_device *pdev)
 			meminfo = list_first_entry(
 				&camsys_dev->devmems.memslist,
 				camsys_meminfo_t, list);
-			if (meminfo)
+			if (!meminfo)
 				continue;
 
 			list_del_init(&meminfo->list);

@@ -524,7 +524,7 @@
 			power_off_thresd = <3400>;
 			zero_algorithm_vol = <3850>;
 			fb_temperature = <115>;
-			sample_res = <10>;
+			sample_res = <20>;
 			max_soc_offset = <60>;
 			energy_mode = <0>;
 			monitor_sec = <5>;
@@ -662,6 +662,7 @@
 		dsi,lanes = <4>;
 
 		delay,prepare = <120>;
+		delay,enable = <200>;
 
 		disp_timings: display-timings {
 			native-mode = <&timing0>;
@@ -686,6 +687,10 @@
 
 &mipi_dphy {
 	rockchip,dsi-panel = <&dsi_panel>;
+	status = "okay";
+};
+
+&route_mipi {
 	status = "okay";
 };
 

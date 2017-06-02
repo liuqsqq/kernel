@@ -210,6 +210,8 @@ static const struct vop_ctrl rk3288_ctrl_data = {
 	.dsp_data_swap = VOP_REG(RK3288_DSP_CTRL0, 0x1f, 12),
 	.dsp_ccir656_avg = VOP_REG(RK3288_DSP_CTRL0, 0x1, 20),
 	.dsp_blank = VOP_REG(RK3288_DSP_CTRL0, 0x3, 18),
+	.update_gamma_lut = VOP_REG_VER(RK3288_DSP_CTRL1, 0x1, 7, 3, 5, -1),
+	.lut_buffer_index = VOP_REG_VER(RK3399_DBG_POST_REG1, 0x1, 1, 3, 5, -1),
 	.dsp_lut_en = VOP_REG(RK3288_DSP_CTRL1, 0x1, 0),
 	.out_mode = VOP_REG(RK3288_DSP_CTRL0, 0xf, 0),
 
@@ -540,6 +542,13 @@ static const struct vop_data rk3399_vop_lit = {
 	.win_size = ARRAY_SIZE(rk3399_vop_lit_win_data),
 };
 
+static const struct vop_win_data rk322x_vop_win_data[] = {
+	{ .base = 0x00, .phy = &rk3288_win01_data,
+	  .type = DRM_PLANE_TYPE_PRIMARY },
+	{ .base = 0x40, .phy = &rk3288_win01_data,
+	  .type = DRM_PLANE_TYPE_CURSOR },
+};
+
 static const struct vop_data rk322x_vop = {
 	.version = VOP_VERSION(3, 7),
 	.feature = VOP_FEATURE_OUTPUT_10BIT,
@@ -547,8 +556,8 @@ static const struct vop_data rk322x_vop = {
 	.max_output = {4096, 2160},
 	.intr = &rk3366_vop_intr,
 	.ctrl = &rk3288_ctrl_data,
-	.win = rk3368_vop_win_data,
-	.win_size = ARRAY_SIZE(rk3368_vop_win_data),
+	.win = rk322x_vop_win_data,
+	.win_size = ARRAY_SIZE(rk322x_vop_win_data),
 };
 
 static const struct vop_ctrl rk3328_ctrl_data = {
