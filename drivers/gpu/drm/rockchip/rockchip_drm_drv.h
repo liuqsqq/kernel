@@ -69,8 +69,14 @@ struct rockchip_atomic_commit {
 	struct mutex lock;
 };
 
+struct rockchip_dclk_pll {
+	struct clk *pll;
+	unsigned int use_count;
+};
+
 struct rockchip_crtc_state {
 	struct drm_crtc_state base;
+	struct rockchip_dclk_pll *pll;
 	int left_margin;
 	int right_margin;
 	int top_margin;
@@ -120,6 +126,7 @@ struct rockchip_logo {
  */
 struct rockchip_drm_private {
 	struct rockchip_logo *logo;
+	struct drm_property *logo_ymirror_prop;
 	struct drm_fb_helper *fbdev_helper;
 	struct drm_gem_object *fbdev_bo;
 	const struct rockchip_crtc_funcs *crtc_funcs[ROCKCHIP_MAX_CRTC];
@@ -134,6 +141,8 @@ struct rockchip_drm_private {
 	/* protect drm_mm on multi-threads */
 	struct mutex mm_lock;
 	struct drm_mm mm;
+	struct rockchip_dclk_pll default_pll;
+	struct rockchip_dclk_pll hdmi_pll;
 };
 
 #ifndef MODULE

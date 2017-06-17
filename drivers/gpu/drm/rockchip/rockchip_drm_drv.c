@@ -27,6 +27,7 @@
 #include <linux/module.h>
 #include <linux/of_address.h>
 #include <linux/of_graph.h>
+#include <linux/clk.h>
 #include <linux/component.h>
 #include <linux/fence.h>
 #include <linux/console.h>
@@ -255,7 +256,7 @@ get_framebuffer_by_node(struct drm_device *drm_dev, struct device_node *node)
 	}
 	bpp = val;
 
-	mode_cmd.pitches[0] = mode_cmd.width * bpp / 8;
+	mode_cmd.pitches[0] = ALIGN(mode_cmd.width * bpp, 32) / 8;
 
 	switch (bpp) {
 	case 16:
@@ -265,7 +266,7 @@ get_framebuffer_by_node(struct drm_device *drm_dev, struct device_node *node)
 		mode_cmd.pixel_format = DRM_FORMAT_BGR888;
 		break;
 	case 32:
-		mode_cmd.pixel_format = DRM_FORMAT_XBGR8888;
+		mode_cmd.pixel_format = DRM_FORMAT_XRGB8888;
 		break;
 	default:
 		pr_err("%s: unsupport to logo bpp %d\n", __func__, bpp);
@@ -478,7 +479,7 @@ static int update_state(struct drm_device *drm_dev,
 			struct rockchip_drm_mode_set *set,
 			unsigned int *plane_mask)
 {
-	struct drm_mode_config *mode_config = &drm_dev->mode_config;
+	struct rockchip_drm_private *priv = drm_dev->dev_private;
 	struct drm_crtc *crtc = set->crtc;
 	struct drm_connector *connector = set->connector;
 	struct drm_display_mode *mode = set->mode;
@@ -507,7 +508,6 @@ static int update_state(struct drm_device *drm_dev,
 	} else {
 		const struct drm_encoder_helper_funcs *encoder_helper_funcs;
 		const struct drm_connector_helper_funcs *connector_helper_funcs;
-		struct rockchip_drm_private *priv = drm_dev->dev_private;
 		struct drm_encoder *encoder;
 		int pipe = drm_crtc_index(crtc);
 
@@ -549,8 +549,8 @@ static int update_state(struct drm_device *drm_dev,
 		 * some vop maybe not support ymirror, but force use it now.
 		 */
 		drm_atomic_plane_set_property(crtc->primary, primary_state,
-					      mode_config->rotation_property,
-					      BIT(DRM_REFLECT_Y));
+					      priv->logo_ymirror_prop,
+					      true);
 
 	return ret;
 }
@@ -636,24 +636,8 @@ static void show_loader_logo(struct drm_device *drm_dev)
 	drm_atomic_clean_old_fb(drm_dev, plane_mask, ret);
 
 	list_for_each_entry_safe(set, tmp, &mode_set_list, head) {
-		struct drm_crtc *crtc = set->crtc;
-
 		list_del(&set->head);
 		kfree(set);
-
-		/* FIXME:
-		 * primary plane state rotation is not BIT(0), but we only want
-		 * it effect on logo display, userspace may not known to clean
-		 * this property, would get unexpect display, so force set
-		 * primary rotation to BIT(0).
-		 */
-		if (!crtc->primary || !crtc->primary->state)
-			continue;
-
-		drm_atomic_plane_set_property(crtc->primary,
-					      crtc->primary->state,
-					      mode_config->rotation_property,
-					      BIT(0));
 	}
 
 	/*
@@ -929,6 +913,30 @@ static int rockchip_drm_bind(struct device *dev)
 	INIT_WORK(&private->commit.work, rockchip_drm_atomic_work);
 
 	drm_dev->dev_private = private;
+
+	private->hdmi_pll.pll = devm_clk_get(dev, "hdmi-tmds-pll");
+	if (PTR_ERR(private->hdmi_pll.pll) == -ENOENT) {
+		private->hdmi_pll.pll = NULL;
+	} else if (PTR_ERR(private->hdmi_pll.pll) == -EPROBE_DEFER) {
+		ret = -EPROBE_DEFER;
+		goto err_free;
+	} else if (IS_ERR(private->hdmi_pll.pll)) {
+		dev_err(dev, "failed to get hdmi-tmds-pll\n");
+		ret = PTR_ERR(private->hdmi_pll.pll);
+		goto err_free;
+	}
+
+	private->default_pll.pll = devm_clk_get(dev, "default-vop-pll");
+	if (PTR_ERR(private->default_pll.pll) == -ENOENT) {
+		private->default_pll.pll = NULL;
+	} else if (PTR_ERR(private->default_pll.pll) == -EPROBE_DEFER) {
+		ret = -EPROBE_DEFER;
+		goto err_free;
+	} else if (IS_ERR(private->default_pll.pll)) {
+		dev_err(dev, "failed to get default vop pll\n");
+		ret = PTR_ERR(private->default_pll.pll);
+		goto err_free;
+	}
 
 #ifdef CONFIG_DRM_DMA_SYNC
 	private->cpu_fence_context = fence_context_alloc(1);

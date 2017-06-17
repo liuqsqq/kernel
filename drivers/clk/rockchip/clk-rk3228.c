@@ -255,7 +255,7 @@ static struct rockchip_clk_branch rk3228_clk_branches[] __initdata = {
 			RK2928_CLKGATE_CON(4), 0, GFLAGS),
 
 	/* PD_MISC */
-	MUX(0, "hdmiphy", mux_hdmiphy_p, CLK_SET_RATE_PARENT,
+	MUX(HDMIPHY, "hdmiphy", mux_hdmiphy_p, CLK_SET_RATE_PARENT,
 			RK2928_MISC_CON, 13, 1, MFLAGS),
 	MUX(0, "usb480m_phy", mux_usb480m_phy_p, CLK_SET_RATE_PARENT,
 			RK2928_MISC_CON, 14, 1, MFLAGS),
@@ -418,7 +418,7 @@ static struct rockchip_clk_branch rk3228_clk_branches[] __initdata = {
 			RK2928_CLKSEL_CON(29), 0, 3, DFLAGS),
 	DIV(0, "sclk_vop_pre", "sclk_vop_src", 0,
 			RK2928_CLKSEL_CON(27), 8, 8, DFLAGS),
-	MUX(DCLK_VOP, "dclk_vop", mux_dclk_vop_p, 0,
+	MUX(DCLK_VOP, "dclk_vop", mux_dclk_vop_p, CLK_SET_RATE_PARENT | CLK_SET_RATE_NO_REPARENT,
 			RK2928_CLKSEL_CON(27), 1, 1, MFLAGS),
 
 	FACTOR(0, "xin12m", "xin24m", 0, 1, 2),
@@ -663,11 +663,37 @@ static struct rockchip_clk_branch rk3228_clk_branches[] __initdata = {
 
 static const char *const rk3228_critical_clocks[] __initconst = {
 	"aclk_cpu",
-	"hclk_cpu",
 	"pclk_cpu",
+	"hclk_cpu",
 	"aclk_peri",
 	"hclk_peri",
 	"pclk_peri",
+	"aclk_rga_noc",
+	"aclk_iep_noc",
+	"aclk_vop_noc",
+	"aclk_hdcp_noc",
+	"hclk_vio_ahb_arbi",
+	"hclk_vio_noc",
+	"hclk_vop_noc",
+	"hclk_host0_arb",
+	"hclk_host1_arb",
+	"hclk_host2_arb",
+	"hclk_otg_pmu",
+	"aclk_gpu_noc",
+	"sclk_initmem_mbist",
+	"aclk_initmem",
+	"hclk_rom",
+	"pclk_ddrupctl",
+	"pclk_ddrmon",
+	"pclk_msch_noc",
+	"pclk_stimer",
+	"pclk_ddrphy",
+	"pclk_acodecphy",
+	"pclk_phy_noc",
+	"aclk_vpu_noc",
+	"aclk_rkvdec_noc",
+	"hclk_vpu_noc",
+	"hclk_rkvdec_noc",
 };
 
 static void __init rk3228_clk_init(struct device_node *np)

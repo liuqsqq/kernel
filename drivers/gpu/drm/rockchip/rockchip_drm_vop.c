@@ -133,6 +133,7 @@ struct vop_plane_state {
 	struct drm_plane_state base;
 	int format;
 	int zpos;
+	unsigned int logo_ymirror;
 	struct drm_rect src;
 	struct drm_rect dest;
 	dma_addr_t yrgb_mst;
@@ -211,6 +212,8 @@ struct vop {
 	struct clk *dclk;
 	/* vop share memory frequency */
 	struct clk *aclk;
+	/* vop source handling, optional */
+	struct clk *dclk_source;
 
 	/* vop dclk reset */
 	struct reset_control *dclk_rst;
@@ -1108,7 +1111,8 @@ static int vop_plane_atomic_check(struct drm_plane *plane,
 	}
 
 	offset = (src->x1 >> 16) * drm_format_plane_bpp(fb->pixel_format, 0) / 8;
-	if (state->rotation & BIT(DRM_REFLECT_Y))
+	if (state->rotation & BIT(DRM_REFLECT_Y) ||
+	    (rockchip_fb_is_logo(fb) && vop_plane_state->logo_ymirror))
 		offset += ((src->y2 >> 16) - 1) * fb->pitches[0];
 	else
 		offset += (src->y1 >> 16) * fb->pitches[0];
@@ -1210,7 +1214,8 @@ static void vop_plane_atomic_update(struct drm_plane *plane,
 	dsp_sty = dest->y1 + crtc->mode.vtotal - crtc->mode.vsync_start;
 	dsp_st = dsp_sty << 16 | (dsp_stx & 0xffff);
 
-	ymirror = !!(state->rotation & BIT(DRM_REFLECT_Y));
+	ymirror = state->rotation & BIT(DRM_REFLECT_Y) ||
+		  (rockchip_fb_is_logo(fb) && vop_plane_state->logo_ymirror);
 	xmirror = !!(state->rotation & BIT(DRM_REFLECT_X));
 
 	vop = to_vop(state->crtc);
@@ -1333,6 +1338,7 @@ static int vop_atomic_plane_set_property(struct drm_plane *plane,
 					 struct drm_property *property,
 					 uint64_t val)
 {
+	struct rockchip_drm_private *private = plane->dev->dev_private;
 	struct vop_win *win = to_vop_win(plane);
 	struct vop_plane_state *plane_state = to_vop_plane_state(state);
 
@@ -1343,6 +1349,12 @@ static int vop_atomic_plane_set_property(struct drm_plane *plane,
 
 	if (property == win->rotation_prop) {
 		state->rotation = val;
+		return 0;
+	}
+
+	if (property == private->logo_ymirror_prop) {
+		WARN_ON(!rockchip_fb_is_logo(state->fb));
+		plane_state->logo_ymirror = val;
 		return 0;
 	}
 
@@ -1576,8 +1588,6 @@ vop_crtc_mode_valid(struct drm_crtc *crtc, const struct drm_display_mode *mode,
 
 	if (mode->hdisplay > vop_data->max_output.width)
 		return MODE_BAD_HVALUE;
-	if (mode->vdisplay > vop_data->max_output.height)
-		return MODE_BAD_VVALUE;
 
 	if (mode->flags & DRM_MODE_FLAG_DBLCLK)
 		request_clock *= 2;
@@ -1612,8 +1622,7 @@ static bool vop_crtc_mode_fixup(struct drm_crtc *crtc,
 	struct vop *vop = to_vop(crtc);
 	const struct vop_data *vop_data = vop->data;
 
-	if (mode->hdisplay > vop_data->max_output.width ||
-	    mode->vdisplay > vop_data->max_output.height)
+	if (mode->hdisplay > vop_data->max_output.width)
 		return false;
 
 	drm_mode_set_crtcinfo(adj_mode,
@@ -1655,6 +1664,13 @@ static void vop_crtc_enable(struct drm_crtc *crtc)
 	val |= (adjusted_mode->flags & DRM_MODE_FLAG_NVSYNC) ?
 		   0 : BIT(VSYNC_POSITIVE);
 	VOP_CTRL_SET(vop, pin_pol, val);
+
+	if (vop->dclk_source && s->pll && s->pll->pll) {
+		if (clk_set_parent(vop->dclk_source, s->pll->pll))
+			DRM_DEV_ERROR(vop->dev,
+				      "failed to set dclk's parents\n");
+	}
+
 	switch (s->output_type) {
 	case DRM_MODE_CONNECTOR_LVDS:
 		VOP_CTRL_SET(vop, rgb_en, 1);
@@ -1848,6 +1864,40 @@ static int vop_afbdc_atomic_check(struct drm_crtc *crtc,
 	return 0;
 }
 
+static void vop_dclk_source_generate(struct drm_crtc *crtc,
+				     struct drm_crtc_state *crtc_state)
+{
+	struct rockchip_drm_private *private = crtc->dev->dev_private;
+	struct rockchip_crtc_state *s = to_rockchip_crtc_state(crtc_state);
+	struct rockchip_crtc_state *old_s = to_rockchip_crtc_state(crtc->state);
+	struct vop *vop = to_vop(crtc);
+
+	if (!vop->dclk_source)
+		return;
+
+	if (crtc_state->active) {
+		WARN_ON(s->pll && !s->pll->use_count);
+		if (!s->pll || s->pll->use_count > 1 ||
+		    s->output_type != old_s->output_type) {
+			if (s->pll)
+				s->pll->use_count--;
+
+			if (s->output_type != DRM_MODE_CONNECTOR_HDMIA &&
+			    !private->default_pll.use_count)
+				s->pll = &private->default_pll;
+			else
+				s->pll = &private->hdmi_pll;
+
+			s->pll->use_count++;
+		}
+	} else if (s->pll) {
+		s->pll->use_count--;
+		s->pll = NULL;
+	}
+	if (s->pll && s->pll != old_s->pll)
+		crtc_state->mode_changed = true;
+}
+
 static int vop_crtc_atomic_check(struct drm_crtc *crtc,
 				 struct drm_crtc_state *crtc_state)
 {
@@ -1921,6 +1971,8 @@ static int vop_crtc_atomic_check(struct drm_crtc *crtc,
 	}
 
 	s->dsp_layer_sel = dsp_layer_sel;
+
+	vop_dclk_source_generate(crtc, crtc_state);
 
 err_free_pzpos:
 	kfree(pzpos);
@@ -2285,6 +2337,7 @@ static irqreturn_t vop_isr(int irq, void *data)
 static int vop_plane_init(struct vop *vop, struct vop_win *win,
 			  unsigned long possible_crtcs)
 {
+	struct rockchip_drm_private *private = vop->drm_dev->dev_private;
 	struct drm_plane *share = NULL;
 	unsigned int rotations = 0;
 	struct drm_property *prop;
@@ -2308,8 +2361,16 @@ static int vop_plane_init(struct vop *vop, struct vop_win *win,
 	if (VOP_WIN_SUPPORT(vop, win, xmirror))
 		rotations |= BIT(DRM_REFLECT_X);
 
-	if (VOP_WIN_SUPPORT(vop, win, ymirror))
+	if (VOP_WIN_SUPPORT(vop, win, ymirror)) {
 		rotations |= BIT(DRM_REFLECT_Y);
+
+		prop = drm_property_create_bool(vop->drm_dev,
+						DRM_MODE_PROP_ATOMIC,
+						"LOGO_YMIRROR");
+		if (!prop)
+			return -ENOMEM;
+		private->logo_ymirror_prop = prop;
+	}
 
 	if (rotations) {
 		rotations |= BIT(DRM_ROTATE_0);
@@ -2725,6 +2786,16 @@ static int vop_bind(struct device *dev, struct device *master, void *data)
 	if (IS_ERR(vop->dclk)) {
 		dev_err(vop->dev, "failed to get dclk source\n");
 		return PTR_ERR(vop->dclk);
+	}
+
+	vop->dclk_source = devm_clk_get(vop->dev, "dclk_source");
+	if (PTR_ERR(vop->dclk_source) == -ENOENT) {
+		vop->dclk_source = NULL;
+	} else if (PTR_ERR(vop->dclk_source) == -EPROBE_DEFER) {
+		return -EPROBE_DEFER;
+	} else if (IS_ERR(vop->dclk_source)) {
+		dev_err(vop->dev, "failed to get dclk source parent\n");
+		return PTR_ERR(vop->dclk_source);
 	}
 
 	irq = platform_get_irq(pdev, 0);

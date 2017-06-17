@@ -151,8 +151,8 @@
 
 	cpuinfo {
 		compatible = "rockchip,cpuinfo";
-		nvmem-cells = <&efuse_id>;
-		nvmem-cell-names = "id";
+		nvmem-cells = <&efuse_id>, <&efuse_cpu_version>;
+		nvmem-cell-names = "id", "cpu-version";
 	};
 
 	psci {
@@ -535,6 +535,7 @@
 			clocks = <&cru ACLK_DMAC>;
 			clock-names = "apb_pclk";
 			#dma-cells = <1>;
+			peripherals-req-type-burst;
 		};
 	};
 
@@ -556,6 +557,10 @@
 		};
 		logic_leakage: logic-leakage@19 {
 			reg = <0x19 0x1>;
+		};
+		efuse_cpu_version: cpu-version@1a {
+			reg = <0x1a 0x1>;
+			bits = <3 3>;
 		};
 	};
 
@@ -617,6 +622,123 @@
 		};
 	};
 
+	vpu_service: vpu-service@ff350000 {
+		compatible = "rockchip,vpu_service";
+		reg = <0x0 0xff350000 0x0 0x800>;
+		interrupts = <GIC_SPI 9 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "irq_dec";
+		resets = <&cru SRST_VCODEC_A>, <&cru SRST_VCODEC_H>;
+		reset-names = "video_a", "video_h";
+		clocks = <&cru ACLK_VPU>, <&cru HCLK_VPU>;
+		clock-names = "aclk_vcodec", "hclk_vcodec";
+		rockchip,grf = <&grf>;
+		iommus = <&vpu_mmu>;
+		allocator = <1>;
+		status = "disabled";
+	};
+
+	vpu_mmu: iommu@ff350800 {
+		compatible = "rockchip,iommu";
+		reg = <0x0 0xff350800 0x0 0x40>;
+		interrupts = <GIC_SPI 11 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "vpu_mmu";
+		clock-names = "aclk", "hclk";
+		clocks = <&cru ACLK_VPU>, <&cru HCLK_VPU>;
+		#iommu-cells = <0>;
+	};
+
+	rkvdec: rkvdec@ff36000 {
+		compatible = "rockchip,rkvdec";
+		reg = <0x0 0xff360000 0x0 0x400>;
+		interrupts = <GIC_SPI 7 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "irq_dec";
+		clocks = <&cru ACLK_RKVDEC>, <&cru HCLK_RKVDEC>,
+			<&cru SCLK_VDEC_CABAC>, <&cru SCLK_VDEC_CORE>;
+		clock-names = "aclk_vcodec", "hclk_vcodec", "clk_cabac",
+			"clk_core";
+		resets = <&cru SRST_VDEC_A>, <&cru SRST_VDEC_H>,
+			<&cru SRST_VDEC_NIU_A>, <&cru SRST_VDEC_NIU_H>,
+			<&cru SRST_VDEC_CABAC>, <&cru SRST_VDEC_CORE>;
+		reset-names = "video_a", "video_h", "niu_a", "niu_h",
+			"cabac", "video";
+		rockchip,grf = <&grf>;
+		iommus = <&rkvdec_mmu>;
+		allocator = <1>;
+		status = "disabled";
+	};
+
+	rkvdec_mmu: iommu@ff360480 {
+		compatible = "rockchip,iommu";
+		reg = <0x0 0xff360480 0x0 0x40>, <0x0 0xff3604c0 0x0 0x40>;
+		interrupts = <GIC_SPI 74 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "rkvdec_mmu";
+		clocks = <&cru ACLK_RKVDEC>, <&cru HCLK_RKVDEC>;
+		clock-names = "aclk_vcodec", "hclk_vcodec";
+		#iommu-cells = <0>;
+	};
+
+	h265e: h265e@ff330000 {
+		compatible = "rockchip,h265e";
+		rockchip,grf = <&grf>;
+		iommu_enabled = <1>;
+		iommus = <&h265e_mmu>;
+		reg = <0x0 0xff330000 0 0x200>;
+		interrupts = <GIC_SPI 95 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&cru ACLK_H265>, <&cru PCLK_H265>,
+			<&cru SCLK_VENC_CORE>, <&cru SCLK_VENC_DSP>,
+			<&cru ACLK_RKVENC>, <&cru ACLK_AXISRAM>;
+		clock-names = "aclk_h265", "pclk_h265", "clk_core",
+			"clk_dsp", "aclk_venc", "aclk_axi2sram";
+		rockchip,srv = <&venc_srv>;
+		mode_bit = <11>;
+		mode_ctrl = <0x40c>;
+		name = "h265e";
+		allocator = <1>;
+		status = "disabled";
+	};
+
+	h265e_mmu: iommu@ff330200 {
+		compatible = "rockchip,iommu";
+		reg = <0x0 0xff330200 0 0x100>;
+		interrupts = <GIC_SPI 96 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "h265e_mmu";
+		#iommu-cells = <0>;
+	};
+
+	vepu: vepu@ff340000 {
+		compatible = "rockchip,rk3328-vepu", "rockchip,vepu";
+		rockchip,grf = <&grf>;
+		iommu_enabled = <1>;
+		iommus = <&vepu_mmu>;
+		reg = <0x0 0xff340000 0x0 0x400>;
+		interrupts = <GIC_SPI 97 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&cru ACLK_VPU>, <&cru HCLK_VPU>;
+		clock-names = "aclk_vcodec", "hclk_vcodec";
+		resets = <&cru SRST_RKVENC_H264_H>,
+			<&cru SRST_RKVENC_H264_A>;
+		reset-names = "video_h", "video_a";
+		rockchip,srv = <&venc_srv>;
+		mode_bit = <11>;
+		mode_ctrl = <0x40c>;
+		name = "vepu";
+		allocator = <1>;
+		status = "disabled";
+	};
+
+	vepu_mmu: iommu@ff340800 {
+		compatible = "rockchip,iommu";
+		reg = <0x0 0xff340800 0x0 0x40>;
+		interrupts = <GIC_SPI 98 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "vepu_mmu";
+		clocks = <&cru ACLK_VPU>, <&cru HCLK_VPU>;
+		clock-names = "aclk", "hclk";
+		#iommu-cells = <0>;
+	};
+
+	venc_srv: venc_srv {
+		compatible = "rockchip,mpp_service";
+	};
+
 	vop: vop@ff370000 {
 		compatible = "rockchip,rk3328-vop";
 		reg = <0x0 0xff370000 0x0 0x3efc>;
@@ -631,6 +753,11 @@
 		vop_out: port {
 			#address-cells = <1>;
 			#size-cells = <0>;
+
+			vop_out_hdmi: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&hdmi_in_vop>;
+			};
 		};
 	};
 
@@ -641,6 +768,48 @@
 		interrupt-names = "vop_mmu";
 		#iommu-cells = <0>;
 		status = "disabled";
+	};
+
+	hdmi: hdmi@ff3c0000 {
+		compatible = "rockchip,rk3328-dw-hdmi";
+		reg = <0x0 0xff3c0000 0x0 0x20000>,
+		      <0x0 0xff430000 0x0 0x10000>;
+		reg-io-width = <4>;
+		interrupts = <GIC_SPI 35 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 71 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 83 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&cru PCLK_HDMI>,
+			 <&cru SCLK_HDMI_SFC>,
+			 <&cru PCLK_HDMIPHY>,
+			 <&cru HCLK_VIO>;
+		clock-names = "iahb",
+			      "isfr",
+			      "pclk_hdmiphy",
+			      "hclk_vio";
+		#clock-cells = <0>;
+		clock-output-names = "hdmi_phy";
+		assigned-clocks = <&cru HDMIPHY>;
+		assigned-clock-parents = <&hdmi>;
+		pinctrl-names = "default", "gpio";
+		pinctrl-0 = <&hdmi_cec &hdmii2c_xfer &hdmi_hpd>;
+		pinctrl-1 = <&i2c3_gpio>;
+		resets = <&cru SRST_HDMI_P>,
+			 <&cru SRST_HDMIPHY>;
+		reset-names = "hdmi",
+			      "hdmiphy";
+		rockchip,grf = <&grf>;
+		status = "disabled";
+
+		ports {
+			hdmi_in: port {
+				#address-cells = <1>;
+				#size-cells = <0>;
+				hdmi_in_vop: endpoint@0 {
+					reg = <0>;
+					remote-endpoint = <&vop_out_hdmi>;
+				};
+			};
+		};
 	};
 
 	display_subsystem: display-subsystem {
