@@ -117,6 +117,53 @@ enum subpixel_order {
 	SubPixelVerticalRGB,
 	SubPixelVerticalBGR,
 	SubPixelNone,
+
+};
+
+/**
+ * struct drm_scrambling: sink's scrambling support.
+ */
+struct drm_scrambling {
+	/**
+	 * @supported: scrambling supported for rates > 340 Mhz.
+	 */
+	bool supported;
+	/**
+	 * @low_rates: scrambling supported for rates <= 340 Mhz.
+	 */
+	bool low_rates;
+};
+
+/*
+ * struct drm_scdc - Information about scdc capabilities of a HDMI 2.0 sink
+ *
+ * Provides SCDC register support and capabilities related information on a
+ * HDMI 2.0 sink. In case of a HDMI 1.4 sink, all parameter must be 0.
+ */
+struct drm_scdc {
+	/**
+	 * @supported: status control & data channel present.
+	 */
+	bool supported;
+	/**
+	 * @read_request: sink is capable of generating scdc read request.
+	 */
+	bool read_request;
+	/**
+	 * @scrambling: sink's scrambling capabilities
+	 */
+	struct drm_scrambling scrambling;
+};
+
+
+/**
+ * struct drm_hdmi_info - runtime information about the connected HDMI sink
+ *
+ * Describes if a given display supports advanced HDMI 2.0 features.
+ * This information is available in CEA-861-F extension blocks (like HF-VSDB).
+ */
+struct drm_hdmi_info {
+	struct drm_scdc scdc;
 };
 
 #define DRM_COLOR_FORMAT_RGB444		(1<<0)
@@ -159,6 +206,11 @@ struct drm_display_info {
 	u8 edid_hdmi_dc_modes;
 
 	u8 cea_rev;
+
+	/**
+	 * @hdmi: advance features of a HDMI sink.
+	 */
+	struct drm_hdmi_info hdmi;
 };
 
 /* data corresponds to displayid vend/prod/serial */
@@ -734,11 +786,6 @@ struct drm_encoder {
  * @audio_latency: audio latency info from ELD, if found
  * @null_edid_counter: track sinks that give us all zeros for the EDID
  * @bad_edid_counter: track sinks that give us an EDID with invalid checksum
- * @max_tmds_char: indicates the maximum TMDS Character Rate supported
- * @scdc_present: when set the sink supports SCDC functionality
- * @rr_capable: when set the sink is capable of initiating an SCDC read request
- * @lte_340mcsc_scramble: when set the sink supports less than 340Mcsc scramble
- * @flags_3d: 3D view(s) supported by the sink, see drm_edid.h (DRM_EDID_3D_*)
  * @edid_corrupt: indicates whether the last read EDID was corrupt
  * @debugfs_entry: debugfs directory for this connector
  * @state: current atomic state for this connector
@@ -811,13 +858,6 @@ struct drm_connector {
 	int audio_latency[2];
 	int null_edid_counter; /* needed to workaround some HW bugs where we get all 0s */
 	unsigned bad_edid_counter;
-
-	/* EDID bits HDMI 2.0 */
-	int max_tmds_char;	/* in Mcsc */
-	bool scdc_present;
-	bool rr_capable;
-	bool lte_340mcsc_scramble;
-	int flags_3d;
 
 	/* Flag for raw EDID header corruption - used in Displayport
 	 * compliance testing - * Displayport Link CTS Core 1.2 rev1.1 4.2.2.6

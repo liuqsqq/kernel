@@ -268,7 +268,7 @@
 			#power-domain-cells = <1>;
 			#address-cells = <1>;
 			#size-cells = <0>;
-			status = "disabled";
+			status = "okay";
 
 			pd_hevc@RK3328_PD_HEVC {
 				reg = <RK3328_PD_HEVC>;
@@ -599,6 +599,16 @@
 		clock-names = "clk_mali";
 		operating-points-v2 = <&gpu_opp_table>;
 		status = "disabled";
+
+		gpu_power_model: power-model {
+			compatible = "arm,mali-simple-power-model";
+			voltage = <900>;
+			frequency = <500>;
+			static-power = <300>;
+			dynamic-power = <396>;
+			ts = <32000 4700 (-80) 2>;
+			thermal-zone = "soc-thermal";
+		};
 	};
 
 	gpu_opp_table: opp-table2 {
@@ -634,6 +644,7 @@
 		rockchip,grf = <&grf>;
 		iommus = <&vpu_mmu>;
 		allocator = <1>;
+		power-domains = <&power RK3328_PD_VPU>;
 		status = "disabled";
 	};
 
@@ -644,6 +655,7 @@
 		interrupt-names = "vpu_mmu";
 		clock-names = "aclk", "hclk";
 		clocks = <&cru ACLK_VPU>, <&cru HCLK_VPU>;
+		power-domains = <&power RK3328_PD_VPU>;
 		#iommu-cells = <0>;
 	};
 
@@ -664,6 +676,7 @@
 		rockchip,grf = <&grf>;
 		iommus = <&rkvdec_mmu>;
 		allocator = <1>;
+		power-domains = <&power RK3328_PD_VIDEO>;
 		status = "disabled";
 	};
 
@@ -674,6 +687,7 @@
 		interrupt-names = "rkvdec_mmu";
 		clocks = <&cru ACLK_RKVDEC>, <&cru HCLK_RKVDEC>;
 		clock-names = "aclk_vcodec", "hclk_vcodec";
+		power-domains = <&power RK3328_PD_VIDEO>;
 		#iommu-cells = <0>;
 	};
 
@@ -758,6 +772,10 @@
 				reg = <0>;
 				remote-endpoint = <&hdmi_in_vop>;
 			};
+			vop_out_tve: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&tve_in_vop>;
+			};
 		};
 	};
 
@@ -807,6 +825,32 @@
 				hdmi_in_vop: endpoint@0 {
 					reg = <0>;
 					remote-endpoint = <&vop_out_hdmi>;
+				};
+			};
+		};
+	};
+
+	tve: tve@ff373e00 {
+		compatible = "rockchip,rk3328-tve";
+		reg = <0x0 0xff373e00 0x0 0x100>,
+		      <0x0 0xff420000 0x0 0x10000>;
+		rockchip,saturation = <0x00376749>;
+		rockchip,brightcontrast = <0x0000a305>;
+		rockchip,adjtiming = <0xb6c00880>;
+		rockchip,lumafilter0 = <0x01ff0000>;
+		rockchip,lumafilter1 = <0xf40200fe>;
+		rockchip,lumafilter2 = <0xf332d70c>;
+		rockchip,daclevel = <0x22>;
+		rockchip,dac1level = <0x7>;
+		status = "disabled";
+
+		ports {
+			tve_in: port {
+				#address-cells = <1>;
+				#size-cells = <0>;
+				tve_in_vop: endpoint@0 {
+					reg = <0>;
+					remote-endpoint = <&vop_out_tve>;
 				};
 			};
 		};

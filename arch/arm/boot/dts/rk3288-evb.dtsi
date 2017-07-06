@@ -59,7 +59,8 @@
 		};
 	};
 
-	sound {
+	sound: sound {
+		status = "disabled";
 		compatible = "simple-audio-card";
 		simple-audio-card,format = "i2s";
 		simple-audio-card,name = "rockchip,rt5640-codec";
@@ -307,6 +308,7 @@
 
 &i2c4 {
 	status = "okay";
+	clock-frequency = <400000>;
 
 	gsl3673@40 {
 		compatible = "GSL,GSL3673";

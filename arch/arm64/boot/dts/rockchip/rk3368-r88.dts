@@ -49,6 +49,20 @@
 	model = "Rockchip R88";
 	compatible = "rockchip,r88", "rockchip,rk3368";
 
+	hdmi_sound: hdmi-sound {
+		status = "okay";
+		compatible = "simple-audio-card";
+		simple-audio-card,format = "i2s";
+		simple-audio-card,mclk-fs = <256>;
+		simple-audio-card,name = "rockchip,hdmi";
+		simple-audio-card,cpu {
+			sound-dai = <&i2s_8ch>;
+		};
+		simple-audio-card,codec {
+			sound-dai = <&hdmi>;
+		};
+	};
+
 	keys: gpio-keys {
 		compatible = "gpio-keys";
 		#address-cells = <1>;
@@ -155,6 +169,14 @@
 		BT,wake_host_irq = <&gpio3 7 GPIO_ACTIVE_HIGH>;
 		status = "okay";
 	};
+};
+
+&i2s_8ch {
+	status = "okay";
+	rockchip,i2s-broken-burst-len;
+	rockchip,playback-channels = <8>;
+	rockchip,capture-channels = <2>;
+	#sound-dai-cells = <0>;
 };
 
 &emmc {
@@ -410,18 +432,18 @@
 };
 
 &sdio0 {
-	assigned-clocks = <&cru SCLK_SDIO0>;
-	assigned-clock-parents = <&cru PLL_CPLL>;
-	broken-cd;
 	bus-width = <4>;
 	cap-sd-highspeed;
 	cap-sdio-irq;
+	keep-power-in-suspend;
+	max-frequency = <100000000>;
+	mmc-pwrseq = <&sdio_pwrseq>;
 	non-removable;
 	num-slots = <1>;
 	pinctrl-names = "default";
-	pinctrl-0 = <&sdio0_clk &sdio0_cmd &sdio0_bus4>;
-	vmmc-supply = <&vcc_io>;
-	vqmmc-supply = <&vcc_wl>;
+	pinctrl-0 = <&sdio0_bus4 &sdio0_cmd &sdio0_clk>;
+	sd-uhs-sdr104;
+	supports-sdio;
 	status = "okay";
 };
 
@@ -528,8 +550,20 @@
 	status = "okay";
 };
 
+&usb_host0_ohci {
+	status = "okay";
+};
+
 &usb_otg {
 	dr_mode = "device";
+	status = "okay";
+};
+
+&u2phy {
+	status = "okay";
+};
+
+&u2phy_host {
 	status = "okay";
 };
 
@@ -543,6 +577,7 @@
 
 &hdmi {
 	status = "okay";
+	#sound-dai-cells = <0>;
 };
 
 &mailbox {
