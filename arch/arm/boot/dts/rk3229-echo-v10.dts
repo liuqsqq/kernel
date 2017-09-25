@@ -55,6 +55,17 @@
 		reg = <0x60000000 0x40000000>;
 	};
 
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		trust_reserved: trust@0x68400000 {
+			 reg = <0x68400000 0xe00000>;
+			 no-map;
+		};
+	};
+
 	sdio_pwrseq: sdio-pwrseq {
 		compatible = "mmc-pwrseq-simple";
 		clocks = <&rk805 1>;
@@ -138,7 +149,7 @@
 		reg = <0x18>;
 		interrupt-parent = <&gpio1>;
 		interrupts = <12 IRQ_TYPE_LEVEL_LOW>;
-		spinctrl-names = "default";
+		pinctrl-names = "default";
 		pinctrl-0 = <&pmic_int_l>;
 		rockchip,system-power-controller;
 		wakeup-source;
@@ -311,6 +322,18 @@
 	assigned-clock-parents = <&xin24m>;
 };
 
+&sdmmc {
+	status = "okay";
+};
+
 &u2phy0_host {
 	phy-supply = <&vcc_host>;
+};
+
+&usb_host0_ehci {
+	status = "okay";
+};
+
+&usb_host0_ohci {
+	status = "okay";
 };

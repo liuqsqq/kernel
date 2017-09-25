@@ -1589,7 +1589,7 @@ static void hdmi_config_AVI(struct dw_hdmi *hdmi, struct drm_display_mode *mode)
 	u8 val;
 	bool is_hdmi2 = false;
 
-	if ((mode->flags & DRM_MODE_FLAG_420_MASK) ||
+	if (hdmi_bus_fmt_is_yuv420(hdmi->hdmi_data.enc_out_bus_format) ||
 	    hdmi->connector.display_info.hdmi.scdc.supported)
 		is_hdmi2 = true;
 	/* Initialise info frame from DRM mode */
@@ -1760,7 +1760,7 @@ static void hdmi_av_composer(struct dw_hdmi *hdmi,
 	unsigned int hdisplay, vdisplay;
 
 	vmode->mpixelclock = mode->crtc_clock * 1000;
-	if (mode->flags & DRM_MODE_FLAG_420_MASK)
+	if (hdmi_bus_fmt_is_yuv420(hdmi->hdmi_data.enc_out_bus_format))
 		vmode->mpixelclock /= 2;
 	if ((mode->flags & DRM_MODE_FLAG_3D_MASK) ==
 		DRM_MODE_FLAG_3D_FRAME_PACKING)
@@ -1814,7 +1814,7 @@ static void hdmi_av_composer(struct dw_hdmi *hdmi,
 	 * When we're setting a YCbCr420 mode, we need
 	 * to adjust the horizontal timing to suit.
 	 */
-	if (mode->flags & DRM_MODE_FLAG_420_MASK) {
+	if (hdmi_bus_fmt_is_yuv420(hdmi->hdmi_data.enc_out_bus_format)) {
 		hdisplay /= 2;
 		hblank /= 2;
 		h_de_hs /= 2;
@@ -1963,6 +1963,9 @@ static void dw_hdmi_clear_overflow(struct dw_hdmi *hdmi)
 		count = 4;
 		break;
 	case 0x131a:
+	case 0x200a:
+	case 0x201a:
+	case 0x211a:
 		count = 1;
 		break;
 	default:
@@ -1992,6 +1995,7 @@ static void hdmi_disable_overflow_interrupts(struct dw_hdmi *hdmi)
 static int dw_hdmi_setup(struct dw_hdmi *hdmi, struct drm_display_mode *mode)
 {
 	int ret;
+	void *data = hdmi->plat_data->phy_data;
 
 	hdmi_disable_overflow_interrupts(hdmi);
 
@@ -2003,10 +2007,13 @@ static int dw_hdmi_setup(struct dw_hdmi *hdmi, struct drm_display_mode *mode)
 		dev_dbg(hdmi->dev, "CEA mode used vic=%d\n", hdmi->vic);
 	}
 
-	if ((hdmi->vic == 6) || (hdmi->vic == 7) ||
-	    (hdmi->vic == 21) || (hdmi->vic == 22) ||
-	    (hdmi->vic == 2) || (hdmi->vic == 3) ||
-	    (hdmi->vic == 17) || (hdmi->vic == 18))
+	if (hdmi->plat_data->get_enc_out_encoding)
+		hdmi->hdmi_data.enc_out_encoding =
+			hdmi->plat_data->get_enc_out_encoding(data);
+	else if ((hdmi->vic == 6) || (hdmi->vic == 7) ||
+		 (hdmi->vic == 21) || (hdmi->vic == 22) ||
+		 (hdmi->vic == 2) || (hdmi->vic == 3) ||
+		 (hdmi->vic == 17) || (hdmi->vic == 18))
 		hdmi->hdmi_data.enc_out_encoding = V4L2_YCBCR_ENC_601;
 	else
 		hdmi->hdmi_data.enc_out_encoding = V4L2_YCBCR_ENC_709;
@@ -2019,24 +2026,30 @@ static int dw_hdmi_setup(struct dw_hdmi *hdmi, struct drm_display_mode *mode)
 		hdmi->hdmi_data.video_mode.mpixelrepetitioninput = 0;
 	}
 
-	if (mode->flags & DRM_MODE_FLAG_420_MASK) {
+	/* TOFIX: Get input format from plat data or fallback to RGB888 */
+	if (hdmi->plat_data->get_input_bus_format)
 		hdmi->hdmi_data.enc_in_bus_format =
-			MEDIA_BUS_FMT_UYYVYY8_0_5X24;
+			hdmi->plat_data->get_input_bus_format(data);
+	else if (hdmi->plat_data->input_bus_format)
+		hdmi->hdmi_data.enc_in_bus_format =
+			hdmi->plat_data->input_bus_format;
+	else
+		hdmi->hdmi_data.enc_in_bus_format =
+			MEDIA_BUS_FMT_RGB888_1X24;
+
+	/* TOFIX: Default to RGB888 output format */
+	if (hdmi->plat_data->get_output_bus_format)
 		hdmi->hdmi_data.enc_out_bus_format =
-			MEDIA_BUS_FMT_UYYVYY8_0_5X24;
-	} else {
-		/* TOFIX: Get input format from plat data or fallback to RGB888 */
-		if (hdmi->plat_data->input_bus_format)
-			hdmi->hdmi_data.enc_in_bus_format =
-				hdmi->plat_data->input_bus_format;
-		else
-			hdmi->hdmi_data.enc_in_bus_format =
-				MEDIA_BUS_FMT_RGB888_1X24;
-		/* TOFIX: Default to RGB888 output format */
-		hdmi->hdmi_data.enc_out_bus_format = MEDIA_BUS_FMT_RGB888_1X24;
-	}
+			hdmi->plat_data->get_output_bus_format(data);
+	else
+		hdmi->hdmi_data.enc_out_bus_format =
+			MEDIA_BUS_FMT_RGB888_1X24;
+
 	/* TOFIX: Get input encoding from plat data or fallback to none */
-	if (hdmi->plat_data->input_bus_encoding)
+	if (hdmi->plat_data->get_enc_in_encoding)
+		hdmi->hdmi_data.enc_in_encoding =
+			hdmi->plat_data->get_enc_in_encoding(data);
+	else if (hdmi->plat_data->input_bus_encoding)
 		hdmi->hdmi_data.enc_in_encoding =
 			hdmi->plat_data->input_bus_encoding;
 	else
@@ -2054,14 +2067,14 @@ static int dw_hdmi_setup(struct dw_hdmi *hdmi, struct drm_display_mode *mode)
 	/* HDMI Initialization Step B.1 */
 	hdmi_av_composer(hdmi, mode);
 
-	/* HDMI Initialization Step B.2 */
-	dw_hdmi_enable_video_path(hdmi);
-
-	/* HDMI Initializateion Step B.3 */
+	/* HDMI Initializateion Step B.2 */
 	ret = hdmi->phy.ops->init(hdmi, hdmi->phy.data, &hdmi->previous_mode);
 	if (ret)
 		return ret;
 	hdmi->phy.enabled = true;
+
+	/* HDMI Initialization Step B.3 */
+	dw_hdmi_enable_video_path(hdmi);
 
 	if (hdmi->sink_has_audio) {
 		dev_dbg(hdmi->dev, "sink has audio support\n");
@@ -2703,21 +2716,11 @@ static const struct file_operations dw_hdmi_ctrl_fops = {
 static int dw_hdmi_phy_show(struct seq_file *s, void *v)
 {
 	struct dw_hdmi *hdmi = s->private;
-	u32 i, total, val;
-
-	if (hdmi->dev_type == RK3228_HDMI)
-		return 0;
+	u32 i, val;
 
 	seq_puts(s, "\n>>>hdmi_phy reg\n");
-	if (hdmi->dev_type != RK3328_HDMI)
-		total = 0x28;
-	else
-		total = 0x100;
-	for (i = 0; i < total; i++) {
-		if (hdmi->dev_type != RK3328_HDMI)
-			val = hdmi_phy_i2c_read(hdmi, i);
-		else
-			val = hdmi->phy.ops->read(hdmi, hdmi->phy.data, i);
+	for (i = 0; i < 0x28; i++) {
+		val = hdmi_phy_i2c_read(hdmi, i);
 		seq_printf(s, "regs %02x val %04x\n", i, val);
 	}
 	return 0;
@@ -2747,10 +2750,7 @@ dw_hdmi_phy_write(struct file *file, const char __user *buf,
 	}
 	dev_info(hdmi->dev, "/*******hdmi phy register config******/");
 	dev_info(hdmi->dev, "\n reg=%x val=%x\n", reg, val);
-	if (hdmi->dev_type != RK3328_HDMI)
-		dw_hdmi_phy_i2c_write(hdmi, val, reg);
-	else
-		hdmi->phy.ops->write(hdmi, hdmi->phy.data, val, reg);
+	dw_hdmi_phy_i2c_write(hdmi, val, reg);
 	return count;
 }
 
@@ -2772,8 +2772,11 @@ static void dw_hdmi_register_debugfs(struct device *dev, struct dw_hdmi *hdmi)
 	}
 	debugfs_create_file("ctrl", 0400, hdmi->debugfs_dir,
 			    hdmi, &dw_hdmi_ctrl_fops);
-	debugfs_create_file("phy", 0400, hdmi->debugfs_dir,
-			    hdmi, &dw_hdmi_phy_fops);
+
+	if (hdmi->dev_type != RK3228_HDMI &&
+	    hdmi->dev_type != RK3328_HDMI)
+		debugfs_create_file("phy", 0400, hdmi->debugfs_dir,
+				    hdmi, &dw_hdmi_phy_fops);
 }
 
 static void dw_hdmi_register_hdcp(struct device *dev, struct dw_hdmi *hdmi,
@@ -2970,6 +2973,11 @@ int dw_hdmi_bind(struct device *dev, struct device *master,
 
 	/* Unmask HPD, clear transitory interrupts, then unmute */
 	hdmi_writeb(hdmi, hdmi->phy_mask, HDMI_PHY_MASK0);
+
+	if (hdmi->dev_type == RK3288_HDMI && hdmi->version > 0x200a)
+		hdmi->connector.ycbcr_420_allowed = false;
+	else
+		hdmi->connector.ycbcr_420_allowed = true;
 
 	ret = dw_hdmi_register(drm, hdmi);
 	if (ret)

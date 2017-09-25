@@ -64,6 +64,8 @@
 		i2c1 = &i2c1;
 		i2c2 = &i2c2;
 		i2c3 = &i2c3;
+		ethernet0 = &gmac2io;
+		ethernet1 = &gmac2phy;
 	};
 
 	cpus {
@@ -324,6 +326,11 @@
 				map0 {
 					trip = <&target>;
 					cooling-device = <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+					contribution = <4096>;
+				};
+				map1 {
+					trip = <&target>;
+					cooling-device = <&gpu THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
 					contribution = <4096>;
 				};
 			};
@@ -597,10 +604,11 @@
 				  "Mali_PP1_MMU_IRQ";
 		clocks = <&cru ACLK_GPU>;
 		clock-names = "clk_mali";
+		#cooling-cells = <2>; /* min followed by max */
 		operating-points-v2 = <&gpu_opp_table>;
 		status = "disabled";
 
-		gpu_power_model: power-model {
+		gpu_power_model: power_model {
 			compatible = "arm,mali-simple-power-model";
 			voltage = <900>;
 			frequency = <500>;
@@ -716,6 +724,7 @@
 		reg = <0x0 0xff330200 0 0x100>;
 		interrupts = <GIC_SPI 96 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "h265e_mmu";
+		power-domains = <&power RK3328_PD_HEVC>;
 		#iommu-cells = <0>;
 	};
 
@@ -746,6 +755,7 @@
 		interrupt-names = "vepu_mmu";
 		clocks = <&cru ACLK_VPU>, <&cru HCLK_VPU>;
 		clock-names = "aclk", "hclk";
+		power-domains = <&power RK3328_PD_HEVC>;
 		#iommu-cells = <0>;
 	};
 
@@ -790,24 +800,18 @@
 
 	hdmi: hdmi@ff3c0000 {
 		compatible = "rockchip,rk3328-dw-hdmi";
-		reg = <0x0 0xff3c0000 0x0 0x20000>,
-		      <0x0 0xff430000 0x0 0x10000>;
+		reg = <0x0 0xff3c0000 0x0 0x20000>;
 		reg-io-width = <4>;
 		interrupts = <GIC_SPI 35 IRQ_TYPE_LEVEL_HIGH>,
-			     <GIC_SPI 71 IRQ_TYPE_LEVEL_HIGH>,
-			     <GIC_SPI 83 IRQ_TYPE_LEVEL_HIGH>;
+			     <GIC_SPI 71 IRQ_TYPE_LEVEL_HIGH>;
 		clocks = <&cru PCLK_HDMI>,
 			 <&cru SCLK_HDMI_SFC>,
-			 <&cru PCLK_HDMIPHY>,
 			 <&cru HCLK_VIO>;
 		clock-names = "iahb",
 			      "isfr",
-			      "pclk_hdmiphy",
 			      "hclk_vio";
-		#clock-cells = <0>;
-		clock-output-names = "hdmi_phy";
-		assigned-clocks = <&cru HDMIPHY>;
-		assigned-clock-parents = <&hdmi>;
+		phys = <&hdmiphy>;
+		phy-names = "hdmi_phy";
 		pinctrl-names = "default", "gpio";
 		pinctrl-0 = <&hdmi_cec &hdmii2c_xfer &hdmi_hpd>;
 		pinctrl-1 = <&i2c3_gpio>;
@@ -868,6 +872,18 @@
 		rockchip,grf = <&grf>;
 		clocks = <&cru PCLK_ACODEC>;
 		clock-names = "pclk";
+		status = "disabled";
+	};
+
+	hdmiphy: hdmiphy@ff430000 {
+		compatible = "rockchip,rk3328-hdmi-phy";
+		reg = <0x0 0xff430000 0x0 0x10000>;
+		interrupts = <GIC_SPI 83 IRQ_TYPE_LEVEL_HIGH>;
+		#phy-cells = <0>;
+		clocks = <&cru PCLK_HDMIPHY>, <&xin24m>;
+		clock-names = "sysclk", "refclk";
+		#clock-cells = <0>;
+		clock-output-names = "hdmi_phy";
 		status = "disabled";
 	};
 
@@ -1045,7 +1061,7 @@
 		status = "disabled";
 	};
 
-	gmac2io: eth@ff540000 {
+	gmac2io: ethernet@ff540000 {
 		compatible = "rockchip,rk3328-gmac";
 		reg = <0x0 0xff540000 0x0 0x10000>;
 		rockchip,grf = <&grf>;
@@ -1061,6 +1077,29 @@
 			      "pclk_mac";
 		resets = <&cru SRST_GMAC2IO_A>;
 		reset-names = "stmmaceth";
+		status = "disabled";
+	};
+
+	gmac2phy: ethernet@ff550000 {
+		compatible = "rockchip,rk3328-gmac";
+		reg = <0x0 0xff550000 0x0 0x10000>;
+		rockchip,grf = <&grf>;
+		interrupts = <GIC_SPI 21 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "macirq";
+		clocks = <&cru SCLK_MAC2PHY_SRC>, <&cru SCLK_MAC2PHY_RXTX>,
+			 <&cru SCLK_MAC2PHY_RXTX>, <&cru SCLK_MAC2PHY_REF>,
+			 <&cru ACLK_MAC2PHY>, <&cru PCLK_MAC2PHY>,
+			 <&cru SCLK_MAC2PHY_OUT>;
+		clock-names = "stmmaceth", "mac_clk_rx",
+			      "mac_clk_tx", "clk_mac_ref",
+			      "aclk_mac", "pclk_mac",
+			      "clk_macphy";
+		resets = <&cru SRST_GMAC2PHY_A>, <&cru SRST_MACPHY>;
+		reset-names = "stmmaceth", "mac-phy";
+		phy-mode = "rmii";
+		phy-is-integrated;
+		pinctrl-names = "default";
+		pinctrl-0 = <&fephyled_rxm1 &fephyled_linkm1>;
 		status = "disabled";
 	};
 

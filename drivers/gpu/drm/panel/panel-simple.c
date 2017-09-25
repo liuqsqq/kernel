@@ -70,6 +70,10 @@ struct panel_desc {
 	} size;
 
 	/**
+	 * @reset: the time (in milliseconds) indicates the delay time
+	 *         after the panel to operate reset gpio
+	 * @init: the time (in milliseconds) that it takes for the panel to
+	 *           power on and dsi host can send command to panel
 	 * @prepare: the time (in milliseconds) that it takes for the panel to
 	 *           become ready and start receiving video data
 	 * @enable: the time (in milliseconds) that it takes for the panel to
@@ -81,6 +85,8 @@ struct panel_desc {
 	 *             to power itself down completely
 	 */
 	struct {
+		unsigned int reset;
+		unsigned int init;
 		unsigned int prepare;
 		unsigned int enable;
 		unsigned int disable;
@@ -105,7 +111,6 @@ struct panel_simple {
 
 	struct gpio_desc *enable_gpio;
 	struct gpio_desc *reset_gpio;
-	unsigned int reset_delay;
 
 	struct dsi_panel_cmds *on_cmds;
 	struct dsi_panel_cmds *off_cmds;
@@ -229,7 +234,7 @@ static int panel_simple_dsi_send_cmds(struct panel_simple *panel,
 			return -EINVAL;
 		}
 
-		if (err)
+		if (err < 0)
 			dev_err(panel->dev, "failed to write dcs cmd: %d\n",
 				err);
 
@@ -422,11 +427,20 @@ static int panel_simple_prepare(struct drm_panel *panel)
 	if (p->reset_gpio)
 		gpiod_direction_output(p->reset_gpio, 1);
 
-	if (p->reset_delay)
-		msleep(p->reset_delay);
+	if (p->desc && p->desc->delay.reset)
+		msleep(p->desc->delay.reset);
 
 	if (p->reset_gpio)
 		gpiod_direction_output(p->reset_gpio, 0);
+
+	if (p->desc && p->desc->delay.init)
+		msleep(p->desc->delay.init);
+
+	if (p->on_cmds) {
+		err = panel_simple_dsi_send_cmds(p, p->on_cmds);
+		if (err)
+			dev_err(p->dev, "failed to send on cmds\n");
+	}
 
 	p->prepared = true;
 
@@ -436,16 +450,9 @@ static int panel_simple_prepare(struct drm_panel *panel)
 static int panel_simple_enable(struct drm_panel *panel)
 {
 	struct panel_simple *p = to_panel_simple(panel);
-	int err;
 
 	if (p->enabled)
 		return 0;
-
-	if (p->on_cmds) {
-		err = panel_simple_dsi_send_cmds(p, p->on_cmds);
-		if (err)
-			dev_err(p->dev, "failed to send on cmds\n");
-	}
 
 	if (p->desc && p->desc->delay.enable)
 		msleep(p->desc->delay.enable);
@@ -533,14 +540,22 @@ static int panel_simple_probe(struct device *dev, const struct panel_desc *desc)
 
 	if (!of_property_read_u32(dev->of_node, "bus-format", &val))
 		of_desc->bus_format = val;
-	if (!of_property_read_u32(dev->of_node, "delay,prepare", &val))
+	if (!of_property_read_u32(dev->of_node, "prepare-delay-ms", &val))
 		of_desc->delay.prepare = val;
-	if (!of_property_read_u32(dev->of_node, "delay,enable", &val))
+	if (!of_property_read_u32(dev->of_node, "enable-delay-ms", &val))
 		of_desc->delay.enable = val;
-	if (!of_property_read_u32(dev->of_node, "delay,disable", &val))
+	if (!of_property_read_u32(dev->of_node, "disable-delay-ms", &val))
 		of_desc->delay.disable = val;
-	if (!of_property_read_u32(dev->of_node, "delay,unprepare", &val))
+	if (!of_property_read_u32(dev->of_node, "unprepare-delay-ms", &val))
 		of_desc->delay.unprepare = val;
+	if (!of_property_read_u32(dev->of_node, "reset-delay-ms", &val))
+		of_desc->delay.reset = val;
+	if (!of_property_read_u32(dev->of_node, "init-delay-ms", &val))
+		of_desc->delay.init = val;
+	if (!of_property_read_u32(dev->of_node, "width-mm", &val))
+		of_desc->size.width = val;
+	if (!of_property_read_u32(dev->of_node, "height-mm", &val))
+		of_desc->size.height = val;
 
 	panel->enabled = false;
 	panel->prepared = false;
@@ -632,6 +647,7 @@ static void panel_simple_shutdown(struct device *dev)
 	struct panel_simple *panel = dev_get_drvdata(dev);
 
 	panel_simple_disable(&panel->base);
+	panel_simple_unprepare(&panel->base);
 }
 
 static const struct drm_display_mode ampire_am800480r3tmqwa1h_mode = {
@@ -876,6 +892,36 @@ static const struct panel_desc avic_tm070ddh03 = {
 		.prepare = 20,
 		.enable = 200,
 		.disable = 200,
+	},
+};
+
+static const struct drm_display_mode boe_mv238qum_n20_mode = {
+	.clock = 559440,
+	.hdisplay = 3840,
+	.hsync_start = 3840 + 150,
+	.hsync_end = 3840 + 150 + 60,
+	.htotal = 3840 + 150 + 60 + 150,
+	.vdisplay = 2160,
+	.vsync_start = 2160 + 24,
+	.vsync_end = 2160 + 24 + 12,
+	.vtotal = 2160 + 24 + 12 + 24,
+	.vrefresh = 60,
+	.flags = DRM_MODE_FLAG_NVSYNC | DRM_MODE_FLAG_NHSYNC,
+};
+
+static const struct panel_desc boe_mv238qum_n20 = {
+	.modes = &boe_mv238qum_n20_mode,
+	.num_modes = 1,
+	.bpc = 8,
+	.size = {
+		.width = 527,
+		.height = 296,
+	},
+	.delay = {
+		.prepare = 20,
+		.enable = 20,
+		.unprepare = 20,
+		.disable = 20,
 	},
 };
 
@@ -1344,6 +1390,66 @@ static const struct panel_desc sharp_lcd_f402 = {
 	.bus_format = MEDIA_BUS_FMT_RGB666_1X18,
 };
 
+static const struct drm_display_mode lg_lm238wr2_spa1_mode = {
+	.clock = 533250,
+	.hdisplay = 3840,
+	.hsync_start = 3840 + 48,
+	.hsync_end = 3840 + 48 + 32,
+	.htotal = 3840 + 48 + 32 + 80,
+	.vdisplay = 2160,
+	.vsync_start = 2160 + 3,
+	.vsync_end = 2160 + 3 + 5,
+	.vtotal = 2160 + 3 + 5 + 54,
+	.vrefresh = 60,
+	.flags = DRM_MODE_FLAG_NVSYNC | DRM_MODE_FLAG_NHSYNC,
+};
+
+static const struct panel_desc lg_lm238wr2_spa1 = {
+	.modes = &lg_lm238wr2_spa1_mode,
+	.num_modes = 1,
+	.bpc = 8,
+	.size = {
+		.width = 527,
+		.height = 297,
+	},
+	.delay = {
+		.prepare = 20,
+		.enable = 20,
+		.unprepare = 20,
+		.disable = 20,
+	},
+};
+
+static const struct drm_display_mode lg_lm270wr3_ssa1_mode = {
+	.clock = 533250,
+	.hdisplay = 3840,
+	.hsync_start = 3840 + 48,
+	.hsync_end = 3840 + 48 + 32,
+	.htotal = 3840 + 48 + 32 + 80,
+	.vdisplay = 2160,
+	.vsync_start = 2160 + 3,
+	.vsync_end = 2160 + 3 + 5,
+	.vtotal = 2160 + 3 + 5 + 54,
+	.vrefresh = 60,
+	.flags = DRM_MODE_FLAG_NVSYNC | DRM_MODE_FLAG_NHSYNC,
+};
+
+static const struct panel_desc lg_lm270wr3_ssa1 = {
+	.modes = &lg_lm270wr3_ssa1_mode,
+	.num_modes = 1,
+	.bpc = 10,
+	.size = {
+		.width = 598,
+		.height = 336,
+	},
+	.delay = {
+		.prepare = 20,
+		.enable = 20,
+		.unprepare = 20,
+		.disable = 20,
+	},
+};
+
 static const struct drm_display_mode lg_lp079qx1_sp0v_mode = {
 	.clock = 200000,
 	.hdisplay = 1536,
@@ -1617,6 +1723,9 @@ static const struct of_device_id platform_of_match[] = {
 		.compatible = "avic,tm070ddh03",
 		.data = &avic_tm070ddh03,
 	}, {
+		.compatible = "boe,mv238qum-n20",
+		.data = &boe_mv238qum_n20,
+	}, {
 		.compatible = "boe,nv125fhm-n73",
 		.data = &boe_nv125fhm_n73,
 	}, {
@@ -1673,6 +1782,12 @@ static const struct of_device_id platform_of_match[] = {
 	}, {
 		.compatible = "lg,lb070wv8",
 		.data = &lg_lb070wv8,
+	}, {
+		.compatible = "lg,lm238wr2-spa1",
+		.data = &lg_lm238wr2_spa1,
+	}, {
+		.compatible = "lg,lm270wr3-ssa1",
+		.data = &lg_lm270wr3_ssa1,
 	}, {
 		.compatible = "lg,lp079qx1-sp0v",
 		.data = &lg_lp079qx1_sp0v,
@@ -1961,9 +2076,6 @@ static int panel_simple_dsi_probe(struct mipi_dsi_device *dsi)
 
 	if (!of_property_read_u32(dsi->dev.of_node, "dsi,lanes", &val))
 		dsi->lanes = val;
-
-	if (!of_property_read_u32(dsi->dev.of_node, "reset-delay-ms", &val))
-		panel->reset_delay = val;
 
 	data = of_get_property(dsi->dev.of_node, "panel-init-sequence", &len);
 	if (data) {

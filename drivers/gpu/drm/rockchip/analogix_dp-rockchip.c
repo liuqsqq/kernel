@@ -213,6 +213,9 @@ rockchip_dp_drm_encoder_atomic_check(struct drm_encoder *encoder,
 	s->output_type = DRM_MODE_CONNECTOR_eDP;
 	if (info->num_bus_formats)
 		s->bus_format = info->bus_formats[0];
+	else
+		s->bus_format = MEDIA_BUS_FMT_RGB888_1X24;
+	s->tv_state = &conn_state->tv;
 
 	return 0;
 }
@@ -428,7 +431,7 @@ static int rockchip_dp_remove(struct platform_device *pdev)
 
 static const struct dev_pm_ops rockchip_dp_pm_ops = {
 #ifdef CONFIG_PM_SLEEP
-	.suspend = analogix_dp_suspend,
+	.suspend_late = analogix_dp_suspend,
 	.resume_early = analogix_dp_resume,
 #endif
 };

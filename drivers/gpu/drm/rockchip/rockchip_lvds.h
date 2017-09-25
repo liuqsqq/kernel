@@ -78,6 +78,7 @@
 #define RK3288_LVDS_CFG_REG21			0x84
 #define RK3288_LVDS_CFG_REG21_TX_ENABLE		0x92
 #define RK3288_LVDS_CFG_REG21_TX_DISABLE	0x00
+#define RK3288_LVDS_CH1_OFFSET			0x100
 
 /* fbdiv value is split over 2 registers, with bit8 in reg2 */
 #define RK3288_LVDS_PLL_FBDIV_REG2(_fbd) \
@@ -88,6 +89,18 @@
 		(_pd & RK3288_LVDS_CH0_REGD_PLL_PREDIV_MASK)
 
 #define RK3288_LVDS_SOC_CON6_SEL_VOP_LIT	BIT(3)
+
+#define RK3366_GRF_SOC_CON0	0x0400
+#define RK3366_LVDS_VOP_SEL_LIT	(BITS_MASK(1, 1, 0) | BITS_EN(1, 0))
+#define RK3366_LVDS_VOP_SEL_BIG	(BITS_MASK(0, 1, 0) | BITS_EN(1, 0))
+#define RK3366_GRF_SOC_CON5	0x0414
+#define RK3366_GRF_SOC_CON6	0x0418
+
+#define RK3368_GRF_SOC_CON7	0x041c
+#define RK3368_GRF_SOC_CON15	0x043c
+
+#define RK3126_GRF_LVDS_CON0	0x0150
+#define RK3126_GRF_CON1		0x0144
 
 #define LVDS_FMT_MASK				(0x07 << 16)
 #define LVDS_MSB				BIT(3)
@@ -169,13 +182,32 @@
 #define v_LANE1_EN(x)		BITS_MASK(x, 1, 6)
 #define v_LANE0_EN(x)		BITS_MASK(x, 1, 7)
 
-#define v_RK3368_LVDS_OUTPUT_FORMAT(x)	(BITS_MASK(x, 3, 13) | BITS_EN(3, 13))
-#define v_RK3368_LVDS_MSBSEL(x)		(BITS_MASK(x, 1, 11) | BITS_EN(1, 11))
-#define v_RK3368_LVDSMODE_EN(x)		(BITS_MASK(x, 1, 12) | BITS_EN(1, 12))
-#define v_RK3368_MIPIPHY_TTL_EN(x)	(BITS_MASK(x, 1, 15) | BITS_EN(1, 15))
-#define v_RK3368_MIPIPHY_LANE0_EN(x)	(BITS_MASK(x, 1, 5) | BITS_EN(1, 5))
-#define v_RK3368_MIPIDPI_FORCEX_EN(x)	(BITS_MASK(x, 1, 6) | BITS_EN(1, 6))
-#define v_RK3368_FORCE_JETAG(x)		(BITS_MASK(x, 1, 13) | BITS_EN(1, 13))
+/* MIPI DSI Controller register */
+#define MIPIC_PHY_RSTZ		0x00a0
+#define m_PHY_ENABLE_CLK	BIT(2)
+#define MIPIC_PHY_STATUS	0x00b0
+#define m_PHY_LOCK_STATUS	BIT(0)
+
+#define v_RK336X_LVDS_OUTPUT_FORMAT(x)	(BITS_MASK(x, 3, 13) | BITS_EN(3, 13))
+#define v_RK336X_LVDS_MSBSEL(x)		(BITS_MASK(x, 1, 11) | BITS_EN(1, 11))
+#define v_RK336X_LVDSMODE_EN(x)		(BITS_MASK(x, 1, 12) | BITS_EN(1, 12))
+#define v_RK336X_MIPIPHY_TTL_EN(x)	(BITS_MASK(x, 1, 15) | BITS_EN(1, 15))
+#define v_RK336X_MIPIPHY_LANE0_EN(x)	(BITS_MASK(x, 1, 5) | BITS_EN(1, 5))
+#define v_RK336X_MIPIDPI_FORCEX_EN(x)	(BITS_MASK(x, 1, 6) | BITS_EN(1, 6))
+#define v_RK336X_FORCE_JETAG(x)		(BITS_MASK(x, 1, 13) | BITS_EN(1, 13))
+
+#define v_RK3126_LVDS_OUTPUT_FORMAT(x)	(BITS_MASK(x, 3, 1) | BITS_EN(3, 1))
+#define v_RK3126_LVDS_MSBSEL(x)		(BITS_MASK(x, 1, 3) | BITS_EN(1, 3))
+#define v_RK3126_LVDSMODE_EN(x)		(BITS_MASK(x, 1, 6) | BITS_EN(1, 6))
+#define v_RK3126_MIPIPHY_TTL_EN(x)	(BITS_MASK(x, 1, 7) | BITS_EN(1, 7))
+#define v_RK3126_MIPIPHY_LANE0_EN(x)	(BITS_MASK(x, 1, 8) | BITS_EN(1, 8))
+#define v_RK3126_MIPIDPI_FORCEX_EN(x)	(BITS_MASK(x, 1, 9) | BITS_EN(1, 9))
+
+#define v_RK3126_MIPITTL_CLK_EN(x)	(BITS_MASK(x, 1, 7) | BITS_EN(1, 7))
+#define v_RK3126_MIPITTL_LANE0_EN(x)	(BITS_MASK(x, 1, 11) | BITS_EN(1, 11))
+#define v_RK3126_MIPITTL_LANE1_EN(x)	(BITS_MASK(x, 1, 12) | BITS_EN(1, 12))
+#define v_RK3126_MIPITTL_LANE2_EN(x)	(BITS_MASK(x, 1, 13) | BITS_EN(1, 13))
+#define v_RK3126_MIPITTL_LANE3_EN(x)	(BITS_MASK(x, 1, 14) | BITS_EN(1, 14))
 
 enum {
 	LVDS_MSB_D0 = 0,
@@ -183,8 +215,9 @@ enum {
 };
 
 enum rockchip_lvds_sub_devtype {
+	RK3126_LVDS,
 	RK3288_LVDS,
-	RK3368_LVDS,
+	RK336X_LVDS,
 };
 
 #endif /* _ROCKCHIP_LVDS_ */

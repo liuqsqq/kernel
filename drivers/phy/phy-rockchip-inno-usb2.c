@@ -822,6 +822,8 @@ static void rockchip_usb2phy_otg_sm_work(struct work_struct *work)
 					    EXTCON_USB_VBUS_EN) > 0) {
 			dev_dbg(&rport->phy->dev, "usb otg host connect\n");
 			rport->state = OTG_STATE_A_HOST;
+			rphy->chg_state = USB_CHG_STATE_UNDEFINED;
+			rphy->chg_type = POWER_SUPPLY_TYPE_UNKNOWN;
 			mutex_unlock(&rport->mutex);
 			rockchip_usb2phy_power_on(rport->phy);
 			return;
@@ -886,22 +888,31 @@ static void rockchip_usb2phy_otg_sm_work(struct work_struct *work)
 		} else {
 			rphy->chg_state = USB_CHG_STATE_UNDEFINED;
 			rphy->chg_type = POWER_SUPPLY_TYPE_UNKNOWN;
-		}
-		break;
-	case OTG_STATE_B_PERIPHERAL:
-		if (!rport->vbus_attached) {
-			dev_dbg(&rport->phy->dev, "usb disconnect\n");
-			rphy->chg_state = USB_CHG_STATE_UNDEFINED;
-			rphy->chg_type = POWER_SUPPLY_TYPE_UNKNOWN;
-			rport->state = OTG_STATE_B_IDLE;
-			rport->perip_connected = false;
-			delay = 0;
 			mutex_unlock(&rport->mutex);
 			rockchip_usb2phy_power_off(rport->phy);
 			mutex_lock(&rport->mutex);
+		}
+		break;
+	case OTG_STATE_B_PERIPHERAL:
+		sch_work = true;
+
+		if (extcon_get_cable_state_(rphy->edev, EXTCON_USB_HOST) > 0 ||
+		    extcon_get_cable_state_(rphy->edev,
+					    EXTCON_USB_VBUS_EN) > 0) {
+			dev_dbg(&rport->phy->dev, "usb otg host connect\n");
+			rport->state = OTG_STATE_A_HOST;
+			rphy->chg_state = USB_CHG_STATE_UNDEFINED;
+			rphy->chg_type = POWER_SUPPLY_TYPE_UNKNOWN;
+			rport->perip_connected = false;
+			sch_work = false;
+			wake_unlock(&rport->wakelock);
+		} else if (!rport->vbus_attached) {
+			dev_dbg(&rport->phy->dev, "usb disconnect\n");
+			rport->state = OTG_STATE_B_IDLE;
+			rport->perip_connected = false;
+			delay = OTG_SCHEDULE_DELAY * 2;
 			wake_unlock(&rport->wakelock);
 		}
-		sch_work = true;
 		break;
 	case OTG_STATE_A_HOST:
 		if (extcon_get_cable_state_(rphy->edev, EXTCON_USB_HOST) == 0) {
@@ -911,6 +922,9 @@ static void rockchip_usb2phy_otg_sm_work(struct work_struct *work)
 			rockchip_usb2phy_power_off(rport->phy);
 			mutex_lock(&rport->mutex);
 			sch_work = true;
+		} else {
+			mutex_unlock(&rport->mutex);
+			return;
 		}
 		break;
 	default:
@@ -921,6 +935,15 @@ static void rockchip_usb2phy_otg_sm_work(struct work_struct *work)
 	if (extcon_get_state(rphy->edev, cable) != rport->vbus_attached)
 		extcon_set_cable_state_(rphy->edev,
 					cable, rport->vbus_attached);
+	else if (rport->state == OTG_STATE_A_HOST &&
+		 extcon_get_state(rphy->edev, cable))
+		/*
+		 * If plug in OTG host cable when the rport state is
+		 * OTG_STATE_B_PERIPHERAL, the vbus voltage will stay
+		 * in high, so the rport->vbus_attached may not be
+		 * changed. We need to set cable state here.
+		 */
+		extcon_set_cable_state_(rphy->edev, cable, false);
 
 	if (rphy->edev_self &&
 	    (extcon_get_state(rphy->edev, EXTCON_USB) !=
@@ -1246,6 +1269,7 @@ static irqreturn_t rockchip_usb2phy_bvalid_irq(int irq, void *data)
 
 	mutex_unlock(&rport->mutex);
 
+	cancel_delayed_work_sync(&rport->otg_sm_work);
 	rockchip_usb2phy_otg_sm_work(&rport->otg_sm_work.work);
 
 	return IRQ_HANDLED;
@@ -1295,7 +1319,6 @@ static int rockchip_usb2phy_host_port_init(struct rockchip_usb2phy *rphy,
 
 	rport->port_id = USB2PHY_PORT_HOST;
 	rport->port_cfg = &rphy->phy_cfg->port_cfgs[USB2PHY_PORT_HOST];
-	rport->suspended = true;
 
 	mutex_init(&rport->mutex);
 	INIT_DELAYED_WORK(&rport->sm_work, rockchip_usb2phy_sm_work);
@@ -1314,6 +1337,16 @@ static int rockchip_usb2phy_host_port_init(struct rockchip_usb2phy *rphy,
 		dev_err(rphy->dev, "failed to request linestate irq handle\n");
 		return ret;
 	}
+
+	/*
+	 * Let us put phy-port into suspend mode here for saving power
+	 * consumption, and usb controller will resume it during probe
+	 * time if needed.
+	 */
+	ret = property_enable(rphy, &rport->port_cfg->phy_sus, true);
+	if (ret)
+		return ret;
+	rport->suspended = true;
 
 	return 0;
 }
@@ -1339,14 +1372,6 @@ static int rockchip_usb2phy_otg_port_init(struct rockchip_usb2phy *rphy,
 	rport->port_id = USB2PHY_PORT_OTG;
 	rport->port_cfg = &rphy->phy_cfg->port_cfgs[USB2PHY_PORT_OTG];
 	rport->state = OTG_STATE_UNDEFINED;
-
-	/*
-	 * set suspended flag to true, but actually don't
-	 * put phy in suspend mode, it aims to enable usb
-	 * phy and clock in power_on() called by usb controller
-	 * driver during probe.
-	 */
-	rport->suspended = true;
 	rport->vbus_attached = false;
 	rport->perip_connected = false;
 
@@ -1385,13 +1410,13 @@ static int rockchip_usb2phy_otg_port_init(struct rockchip_usb2phy *rphy,
 			extcon_set_state(rphy->edev, EXTCON_USB_VBUS_EN, true);
 			gpiod_set_value_cansleep(rport->vbus_drv_gpio, 1);
 		}
-		return 0;
+		goto out;
 	}
 
 	rport->vbus_always_on =
 		of_property_read_bool(child_np, "rockchip,vbus-always-on");
 	if (rport->vbus_always_on)
-		return 0;
+		goto out;
 
 	wake_lock_init(&rport->wakelock, WAKE_LOCK_SUSPEND, "rockchip_otg");
 	INIT_DELAYED_WORK(&rport->chg_work, rockchip_chg_detect_work);
@@ -1454,6 +1479,17 @@ static int rockchip_usb2phy_otg_port_init(struct rockchip_usb2phy *rphy,
 			return ret;
 		}
 	}
+
+out:
+	/*
+	 * Let us put phy-port into suspend mode here for saving power
+	 * consumption, and usb controller will resume it during probe
+	 * time if needed.
+	 */
+	ret = property_enable(rphy, &rport->port_cfg->phy_sus, true);
+	if (ret)
+		return ret;
+	rport->suspended = true;
 
 	return 0;
 }
@@ -1795,6 +1831,55 @@ static const struct dev_pm_ops rockchip_usb2phy_dev_pm_ops = {
 #define ROCKCHIP_USB2PHY_DEV_PM	NULL
 #endif /* CONFIG_PM_SLEEP */
 
+static const struct rockchip_usb2phy_cfg rk312x_phy_cfgs[] = {
+	{
+		.reg = 0x17c,
+		.num_ports	= 2,
+		.clkout_ctl	= { 0x0190, 15, 15, 1, 0 },
+		.port_cfgs	= {
+			[USB2PHY_PORT_OTG] = {
+				.phy_sus	= { 0x017c, 8, 0, 0, 0x1d1 },
+				.bvalid_det_en	= { 0x017c, 14, 14, 0, 1 },
+				.bvalid_det_st	= { 0x017c, 15, 15, 0, 1 },
+				.bvalid_det_clr	= { 0x017c, 15, 15, 0, 1 },
+				.iddig_output	= { 0x017c, 10, 10, 0, 1 },
+				.iddig_en	= { 0x017c, 9, 9, 0, 1 },
+				.idfall_det_en  = { 0x01a0, 2, 2, 0, 1 },
+				.idfall_det_st  = { 0x01a0, 3, 3, 0, 1 },
+				.idfall_det_clr = { 0x01a0, 3, 3, 0, 1 },
+				.idrise_det_en  = { 0x01a0, 0, 0, 0, 1 },
+				.idrise_det_st  = { 0x01a0, 1, 1, 0, 1 },
+				.idrise_det_clr = { 0x01a0, 1, 1, 0, 1 },
+				.ls_det_en	= { 0x017c, 12, 12, 0, 1 },
+				.ls_det_st	= { 0x017c, 13, 13, 0, 1 },
+				.ls_det_clr	= { 0x017c, 13, 13, 0, 1 },
+				.utmi_bvalid	= { 0x014c, 5, 5, 0, 1 },
+				.utmi_iddig	= { 0x014c, 8, 8, 0, 1 },
+				.utmi_ls	= { 0x014c, 7, 6, 0, 1 },
+			},
+			[USB2PHY_PORT_HOST] = {
+				.phy_sus	= { 0x0194, 8, 0, 0, 0x1d1 },
+				.ls_det_en	= { 0x0194, 14, 14, 0, 1 },
+				.ls_det_st	= { 0x0194, 15, 15, 0, 1 },
+				.ls_det_clr	= { 0x0194, 15, 15, 0, 1 }
+			}
+		},
+		.chg_det = {
+			.opmode		= { 0x017c, 3, 0, 5, 1 },
+			.cp_det		= { 0x02c0, 6, 6, 0, 1 },
+			.dcp_det	= { 0x02c0, 5, 5, 0, 1 },
+			.dp_det		= { 0x02c0, 7, 7, 0, 1 },
+			.idm_sink_en	= { 0x0184, 8, 8, 0, 1 },
+			.idp_sink_en	= { 0x0184, 7, 7, 0, 1 },
+			.idp_src_en	= { 0x0184, 9, 9, 0, 1 },
+			.rdm_pdwn_en	= { 0x0184, 10, 10, 0, 1 },
+			.vdm_src_en	= { 0x0184, 12, 12, 0, 1 },
+			.vdp_src_en	= { 0x0184, 11, 11, 0, 1 },
+		},
+	},
+	{ /* sentinel */ }
+};
+
 static const struct rockchip_usb2phy_cfg rk322x_phy_cfgs[] = {
 	{
 		.reg = 0x760,
@@ -2039,11 +2124,24 @@ static const struct rockchip_usb2phy_cfg rk3399_phy_cfgs[] = {
 				.utmi_hstdet	= { 0xe2ac, 27, 27, 0, 1 }
 			}
 		},
+		.chg_det = {
+			.opmode		= { 0xe464, 3, 0, 5, 1 },
+			.cp_det		= { 0xe2ac, 5, 5, 0, 1 },
+			.dcp_det	= { 0xe2ac, 4, 4, 0, 1 },
+			.dp_det		= { 0xe2ac, 3, 3, 0, 1 },
+			.idm_sink_en	= { 0xe460, 8, 8, 0, 1 },
+			.idp_sink_en	= { 0xe460, 7, 7, 0, 1 },
+			.idp_src_en	= { 0xe460, 9, 9, 0, 1 },
+			.rdm_pdwn_en	= { 0xe460, 10, 10, 0, 1 },
+			.vdm_src_en	= { 0xe460, 12, 12, 0, 1 },
+			.vdp_src_en	= { 0xe460, 11, 11, 0, 1 },
+		},
 	},
 	{ /* sentinel */ }
 };
 
 static const struct of_device_id rockchip_usb2phy_dt_match[] = {
+	{ .compatible = "rockchip,rk3128-usb2phy", .data = &rk312x_phy_cfgs },
 	{ .compatible = "rockchip,rk322x-usb2phy", .data = &rk322x_phy_cfgs },
 	{ .compatible = "rockchip,rk3328-usb2phy", .data = &rk3328_phy_cfgs },
 	{ .compatible = "rockchip,rk3366-usb2phy", .data = &rk3366_phy_cfgs },

@@ -128,11 +128,11 @@
 };
 
 &nandc {
-	status = "okay";
+	status = "disabled";
 };
 
 &emmc {
-	status = "disabled";
+	status = "okay";
 };
 
 &i2c0 {
@@ -272,6 +272,17 @@
 	};
 };
 
+&i2c1 {
+	status = "okay";
+	ts@8 {
+		compatible = "cypress,cy8c4024";
+		reg = <0x8>;
+		interrupt-parent = <&gpio1>;
+		interrupts = <RK_PA1 IRQ_TYPE_LEVEL_LOW>;
+		status = "okay";
+	};
+};
+
 &i2c2 {
 	status = "okay";
 
@@ -338,7 +349,12 @@
 	assigned-clock-parents = <&xin24m>;
 };
 
-&sdmmc {
-	status = "disabled";
+&rockchip_suspend {
+	rockchip,sleep-mode-config = <
+		(0
+		|RKPM_CTR_GTCLKS
+		|RKPM_CTR_IDLESRAM_MD
+		|RKPM_CTR_PMIC
+		)
+	>;
 };
-

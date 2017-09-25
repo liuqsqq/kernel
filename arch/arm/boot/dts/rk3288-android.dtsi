@@ -43,10 +43,17 @@
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/soc/rockchip-system-status.h>
 #include "rk3288-dram-default-timing.dtsi"
+#include <dt-bindings/display/media-bus-format.h>
 
 / {
 	chosen {
-		bootargs = "earlycon=uart8250,mmio32,0xff690000";
+		bootargs = "earlycon=uart8250,mmio32,0xff690000 vmalloc=496M";
+	};
+
+	cpuinfo {
+		compatible = "rockchip,cpuinfo";
+		nvmem-cells = <&efuse_id>;
+		nvmem-cell-names = "id";
 	};
 
 	/delete-node/ dmc@ff610000;
@@ -84,8 +91,8 @@
 			SYS_STATUS_DUALVIEW	396000
 			SYS_STATUS_ISP		396000
 		>;
-		auto-min-freq = <192000>;
-		auto-freq-en = <0>;
+		auto-min-freq = <396000>;
+		auto-freq-en = <1>;
 		status = "diasbled";
 	};
 
@@ -132,7 +139,7 @@
 
 	fiq-debugger {
 		compatible = "rockchip,fiq-debugger";
-		interrupts = <GIC_SPI 153 IRQ_TYPE_LEVEL_HIGH 0>;
+		interrupts = <GIC_SPI 155 IRQ_TYPE_LEVEL_HIGH 0>;
 		rockchip,serial-id = <2>;
 		rockchip,wake-irq = <0>;
 		rockchip,irq-mode-enable = <0>;  /* If enable uart uses irq instead of fiq */
@@ -206,13 +213,22 @@
 				connect = <&vopb_out_edp>;
 			};
 
-			route_mipi: route-mipi {
+			route_dsi0: route-dsi0 {
 				status = "disabled";
 				logo,uboot = "logo.bmp";
 				logo,kernel = "logo_kernel.bmp";
 				logo,mode = "center";
 				charge_logo,mode = "center";
-				connect = <&vopb_out_mipi>;
+				connect = <&vopb_out_dsi0>;
+			};
+
+			route_lvds: route-lvds {
+				status = "disabled";
+				logo,uboot = "logo.bmp";
+				logo,kernel = "logo_kernel.bmp";
+				logo,mode = "center";
+				charge_logo,mode = "center";
+				connect = <&vopb_out_lvds>;
 			};
 		};
 	};
@@ -318,7 +334,7 @@
 		nandc_id = <0>;
 		clocks = <&cru SCLK_NANDC0>, <&cru HCLK_NANDC0>;
 		clock-names = "clk_nandc", "hclk_nandc";
-		status = "disabled";
+		status = "okay";
 	};
 
 	hdmi_analog_sound: hdmi-analog-sound {
@@ -346,6 +362,18 @@
 
 &cpu0 {
 	enable-method = "psci";
+};
+
+&cpu0_opp_table {
+	clocks = <&cru PLL_APLL>;
+	leakage-scaling-sel = <0   254   25>;
+
+	opp-1800000000 {
+		opp-hz = /bits/ 64 <1800000000>;
+		opp-microvolt = <1350000>;
+		clock-latency-ns = <40000>;
+		status = "disabled";
+	};
 };
 
 &cpu1 {
@@ -377,10 +405,20 @@
 	status = "okay";
 };
 
-&mipi_dsi {
+&dsi0 {
 	ports {
-		mipi_in: port {
-			mipi_in_vopl: endpoint@1 {
+		dsi0_in: port {
+			dsi0_in_vopl: endpoint@1 {
+				status = "disabled";
+			};
+		};
+	};
+};
+
+&edp {
+	ports {
+		edp_in: port@0 {
+			edp_in_vopl: endpoint@1 {
 				status = "disabled";
 			};
 		};
@@ -391,6 +429,7 @@
 	compatible = "rockchip,rga2";
 	clocks = <&cru ACLK_RGA>, <&cru HCLK_RGA>, <&cru SCLK_RGA>;
 	clock-names = "aclk_rga", "hclk_rga", "clk_rga";
+	dma-coherent;
 };
 
 &usb_otg {

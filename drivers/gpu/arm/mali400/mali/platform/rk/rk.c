@@ -166,8 +166,6 @@ static int power_model_simple_init(struct platform_device *pdev)
 				tz_name,
 				PTR_ERR(gpu_tz));
 		gpu_tz = NULL;
-
-		return -EPROBE_DEFER;
 	}
 
 	if (of_property_read_u32(power_model_node, "static-power",
@@ -493,7 +491,7 @@ static const struct device_type mali_gpu_device_device_type = {
  */
 static const struct mali_gpu_device_data mali_gpu_data = {
 	.shared_mem_size = 1024 * 1024 * 1024, /* 1GB */
-	.max_job_runtime = 100, /* 100 ms */
+	.max_job_runtime = 60000, /* 60 seconds */
 #if defined(CONFIG_MALI_DEVFREQ) && defined(CONFIG_DEVFREQ_THERMAL)
 	.gpu_cooling_ops = &rk_cooling_ops,
 #endif
