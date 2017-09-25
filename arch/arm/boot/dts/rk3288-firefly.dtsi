@@ -177,7 +177,7 @@
 		 */
 		reset-gpios = <&gpio4 28 GPIO_ACTIVE_LOW>;
 	};
-/*
+
 	sound {
 		compatible = "simple-audio-card";
 		simple-audio-card,name = "SPDIF";
@@ -191,7 +191,6 @@
 		compatible = "linux,spdif-dit";
 		#sound-dai-cells = <0>;
 	};
-*/
 
 	sound_i2s {
 		compatible = "simple-audio-card";
